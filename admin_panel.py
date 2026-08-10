@@ -54,14 +54,15 @@ def panel_notify(text):
 # ============ РЕТРО ПАЛИТРА ============
 
 class Palette:
-    """Чёрно-оранжевая палитра + фиолетовый только для логотипа."""
+    """Чёрно-оранжевая палитра + фиолетовый для цифр и логотипа."""
     BG         = '#000000'  # чистый чёрный
     BG_PANEL   = '#0a0a0a'  # фон панелей
     BG_CARD    = '#121212'  # фон карточек
     BG_INPUT   = '#080808'  # фон полей ввода
-    ORANGE     = '#ff8c42'  # основной оранжевый (всё кроме логотипа)
+    ORANGE     = '#ff8c42'  # основной оранжевый (подписи, текст)
     ORANGE_DIM = '#b85a1a'  # тёмный оранжевый
-    PURPLE     = '#9d4edd'  # ТОЛЬКО для логотипа PRIZMA TATTOO STUDIO
+    PURPLE     = '#9d4edd'  # цифры статистики + логотип
+    GRAY       = '#888888'  # подписи-плашки карточек
     TEXT       = '#ff8c42'  # весь текст оранжевый
     TEXT_DIM   = '#8a5c30'  # приглушённый оранжевый
     RED        = '#ff4757'  # бот НЕ активен
@@ -212,20 +213,20 @@ class RetroButton(tk.Frame):
 # ============ РЕТРО КАРТОЧКА ============
 
 class RetroCard(tk.Frame):
-    """Карточка статистики: оранжевые цифры на чёрном фоне."""
+    """Карточка статистики: серая подпись + фиолетовые цифры на чёрном."""
 
-    def __init__(self, parent, label, accent=Palette.ORANGE):
+    def __init__(self, parent, label, accent=Palette.PURPLE):
         super().__init__(parent, bg=Palette.BG_CARD,
                          highlightthickness=2,
-                         highlightbackground=Palette.ORANGE,
-                         highlightcolor=Palette.ORANGE,
+                         highlightbackground=Palette.GRAY,
+                         highlightcolor=Palette.GRAY,
                          bd=0)
         tk.Label(self, text=label, bg=Palette.BG_CARD,
                  fg=Palette.ORANGE,
                  font=('Consolas', 9, 'bold')).pack(pady=(8, 0))
         self.value_var = tk.StringVar(value="—")
         tk.Label(self, textvariable=self.value_var,
-                 bg=Palette.BG_CARD, fg=Palette.ORANGE,
+                 bg=Palette.BG_CARD, fg=Palette.PURPLE,
                  font=('Consolas', 24, 'bold')).pack(pady=(0, 8))
 
 
