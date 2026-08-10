@@ -4,8 +4,11 @@ from datetime import datetime, timedelta
 import time
 
 
+from config import DB_PATH
+
+
 def get_db():
-    conn = sqlite3.connect('tattoo_bot.db')
+    conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     return conn
 
@@ -99,6 +102,14 @@ def init_db():
         cursor.execute('ALTER TABLE bookings ADD COLUMN notified_24h INTEGER DEFAULT 0')
     except sqlite3.OperationalError:
         pass  # колонка уже существует
+
+    # ponytail: TTL-чистка зависших FSM-состояний старше 7 дней.
+    # Потенциальный потолок: при <7-дневной сессии состояние чистится раньше срока.
+    # Пользователь просто начнёт заново — допустимо для бота записи.
+    cursor.execute(
+        "DELETE FROM user_states "
+        "WHERE updated_at < datetime('now', '-7 days')"
+    )
 
     conn.commit()
     conn.close()

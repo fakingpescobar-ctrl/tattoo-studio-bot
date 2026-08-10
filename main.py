@@ -146,6 +146,11 @@ if __name__ == "__main__":
     while True:
         try:
             bot.infinity_polling(skip_pending=True, timeout=30, long_polling_timeout=30)
+        except KeyboardInterrupt:
+            # Чистый выход по Ctrl+C — без пугающего трейса из ssl.read()
+            logger.info("Бот остановлен (Ctrl+C)")
+            print("\n[OK] Бот остановлен. Пока!")
+            break
         except Exception as e:
             logger.error(f"Polling crashed: {e}. Restarting in 5 seconds...")
             time.sleep(5)
