@@ -263,22 +263,21 @@ class AdminPanel(tk.Tk):
         left = tk.Frame(header, bg=Palette.BG_PANEL)
         left.pack(side='left', padx=14, pady=8)
 
-        # ANSI-style ASCII-арт логотип "PRIZMA" фиолетовым
-        logo_lines = [
-            "██████╗ ██████╗ ██╗ ██████╗██╗  ██╗",
-            "╚════██╗██╔═══██╗██║██╔═══╝██║  ██║",
-            " █████╔╝██║   ██║██║██║     ███████║",
-            " ██╔══╝ ██║   ██║██║██║     ██╔══██║",
-            "███████╗╚██████╔╝██║╚██████╗██║  ██║",
-            "╚══════╝ ╚═════╝ ╚═╝ ╚═════╝╚═╝  ╚═╝",
-        ]
+        # ANSI-style ASCII-арт логотип "PRIZMA TATTOO STUDIO" из logo.txt
+        import os as _os
+        _logo_path = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), 'logo.txt')
+        try:
+            with open(_logo_path, encoding='utf-8') as _f:
+                logo_lines = [line.rstrip() for line in _f if line.strip()]
+        except (OSError, UnicodeDecodeError):
+            logo_lines = ['PRIZMA TATTOO STUDIO']
         for line in logo_lines:
             tk.Label(left, text=line,
                      bg=Palette.BG_PANEL, fg=Palette.PURPLE,
-                     font=('Consolas', 9, 'bold')).pack(anchor='w')
+                     font=('Consolas', 8, 'bold')).pack(anchor='w')
 
-        # Под логотипом — TATTOO STUDIO + мастер, фиолетовым обычным шрифтом
-        tk.Label(left, text="TATTOO STUDIO  ◇  Максим Андреевич  ◇  @tatoo_asbest_best_bot",
+        # Под логотипом — мастер + бот, фиолетовым
+        tk.Label(left, text="Максим Андреевич  ◇  @tatoo_asbest_best_bot",
                  bg=Palette.BG_PANEL, fg=Palette.PURPLE,
                  font=('Consolas', 9, 'bold')).pack(anchor='w', pady=(4, 0))
 
