@@ -22,7 +22,7 @@ def timing(func):
             raise
     return wrapper
 
-from config import ADMIN_ID
+from config import ADMIN_ID, ADMIN_IDS
 from database import *
 from keyboards import *
 
@@ -69,7 +69,7 @@ def price_text(pmin, pmax):
     return f"💵 от {pmin} до {pmax}₽"
 
 def is_admin(user_id):
-    return user_id == ADMIN_ID
+    return user_id in ADMIN_IDS
 
 
 def register_callbacks(bot, user_commands, rate_limit_window, rate_limit_count, rate_limit_block, blocked_users):
@@ -161,6 +161,11 @@ def register_callbacks(bot, user_commands, rate_limit_window, rate_limit_count, 
                                     call.message.chat.id, call.message.message_id)
             elif data == "my_bookings":
                 show_my_bookings(call)
+            elif data.startswith("my_cancel_"):
+                client_cancel_booking(call, int(data.split("_")[2]))
+            elif data.startswith("confirm_my_cancel_"):
+                confirm_client_cancel(call, int(data.split("_")[3]))
+                return
             elif data == "booking_start":
                 save_state(user_id, 'booking_service')
                 start_booking(call)
@@ -359,15 +364,55 @@ def register_callbacks(bot, user_commands, rate_limit_window, rate_limit_count, 
     def show_my_bookings(call):
         bookings = get_user_bookings(call.from_user.id)
         status_map = {'pending': '⏳ Ожидает', 'confirmed': '✅ Подтверждена',
-                      'cancelled': '❌ Отменена', 'completed': '✨ Завершена'}
+                      'cancelled': '❌ Отменена', 'completed': '✨ Завершена',
+                      'client_cancelled': '🚫 Отказ клиента (ожидает мастера)'}
         if not bookings:
             text = "👤 <b>Мои записи</b>\n\nЗаписей нет."
         else:
             text = "👤 <b>Мои записи</b>\n\n"
             for b in bookings:
                 text += f"🎫 #{b['id']} | {b['service']}\n💡 {b['description']}\n📅 {b['date_time']}\nСтатус: {status_map.get(b['status'], '⚠️')}\n\n"
+            if any(b['status'] in ('pending', 'confirmed') for b in bookings):
+                text += "Нажмите ❌ чтобы отказаться от активной записи:"
         bot.edit_message_text(text, call.message.chat.id, call.message.message_id,
-                              reply_markup=get_back_keyboard())
+                              reply_markup=get_my_bookings_keyboard(bookings))
+
+    def client_cancel_booking(call, booking_id):
+        """Клиент отменяет свою запись — статус client_cancelled, висит у мастера"""
+        b = get_booking_by_id(booking_id)
+        if not b or b['user_id'] != call.from_user.id:
+            bot.answer_callback_query(call.id, "Запись не найдена", show_alert=True)
+            return
+        if b['status'] not in ('pending', 'confirmed'):
+            bot.answer_callback_query(call.id, "Эту запись уже нельзя отменить", show_alert=True)
+            return
+        text = (f"❓ <b>Отказаться от записи #{booking_id}?</b>\n\n"
+                f"📝 {b['service']}\n📅 {b['date_time']}\n\n"
+                f"Мастер увидит ваш отказ. Запись удалится только после подтверждения мастером.")
+        bot.edit_message_text(text, call.message.chat.id, call.message.message_id,
+                              reply_markup=get_confirm_cancel_keyboard(booking_id))
+
+    def confirm_client_cancel(call, booking_id):
+        b = get_booking_by_id(booking_id)
+        if not b or b['user_id'] != call.from_user.id:
+            bot.answer_callback_query(call.id, "Запись не найдена", show_alert=True)
+            return
+        if b['status'] not in ('pending', 'confirmed'):
+            bot.answer_callback_query(call.id, "Эту запись уже нельзя отменить", show_alert=True)
+            return
+        update_booking_status(booking_id, 'client_cancelled')
+        user = call.from_user
+        notify_admin(f"🚫 <b>Клиент отказался от записи #{booking_id}!</b>\n\n"
+                     f"👤 @{user.username or 'без ника'} ({user.full_name})\n"
+                     f"📝 {b['service']}\n📅 {b['date_time']}\n\n"
+                     f"Запись висит до вашего подтверждения. Нажмите «❌ Отменить» в карточке записи, чтобы удалить её и освободить слот.")
+        bot.answer_callback_query(call.id, "Отказ отправлен мастеру", show_alert=True)
+        bot.edit_message_text(f"🚫 <b>Запись #{booking_id} отменена</b>\n\n"
+                              f"📝 {b['service']}\n📅 {b['date_time']}\n\n"
+                              f"Мастер уведомлён. Запись будет удалена после подтверждения мастером.",
+                              call.message.chat.id, call.message.message_id,
+                              reply_markup=get_main_menu(is_admin(call.from_user.id)))
+        threading.Thread(target=refresh_overlay_async, daemon=True).start()
 
     def start_booking(call):
         services = get_services()
@@ -458,16 +503,23 @@ def register_callbacks(bot, user_commands, rate_limit_window, rate_limit_count, 
         user = get_user_by_id(b['user_id'])
         uname = f"@{user['username']}" if user and user['username'] else f"ID:{b['user_id']}"
         status_map = {'pending': '⏳ Ожидает', 'confirmed': '✅ Подтверждена',
-                      'cancelled': '❌ Отменена', 'completed': '✨ Завершена'}
-        text = (f"🎫 <b>Запись #{b['id']}</b>\n\n👤 {uname} ({user['first_name'] if user else ''})\n📝 {b['service']}\n💡 {b['description']}\n📅 {b['date_time']}\nСтатус: {status_map.get(b['status'], '⚠️')}")
+                      'cancelled': '❌ Отменена', 'completed': '✨ Завершена',
+                      'client_cancelled': '🚫 ОТКАЗ КЛИЕНТА'}
+        status_line = status_map.get(b['status'], '⚠️')
+        if b['status'] == 'client_cancelled':
+            status_line += " — ждёт отмены мастером"
+        text = (f"🎫 <b>Запись #{b['id']}</b>\n\n👤 {uname} ({user['first_name'] if user else ''})\n📝 {b['service']}\n💡 {b['description']}\n📅 {b['date_time']}\nСтатус: {status_line}")
         bot.edit_message_text(text, call.message.chat.id, call.message.message_id,
-                              reply_markup=get_admin_booking_actions(booking_id))
+                              reply_markup=get_admin_booking_actions(booking_id, b['status']))
 
     def admin_booking_action(call, action, booking_id):
         if not is_admin(call.from_user.id):
             return
         b = get_booking_by_id(booking_id)
         if not b:
+            return
+        if action in ("confirm", "complete") and b['status'] == 'client_cancelled':
+            bot.answer_callback_query(call.id, "Клиент уже отказался. Используйте «❌ Отменить»", show_alert=True)
             return
         if action == "confirm":
             update_booking_status(booking_id, 'confirmed')

@@ -223,9 +223,30 @@ def get_admin_keyboard():
     )
     return markup
 
+def get_my_bookings_keyboard(bookings):
+    """Кнопки отмены для активных записей клиента (pending/confirmed)"""
+    markup = types.InlineKeyboardMarkup()
+    for b in bookings:
+        if b['status'] in ('pending', 'confirmed'):
+            markup.add(types.InlineKeyboardButton(
+                f"❌ Отменить запись #{b['id']}",
+                callback_data=f"my_cancel_{b['id']}"))
+    markup.add(types.InlineKeyboardButton("◀️ В меню", callback_data="menu"))
+    return markup
+
+def get_confirm_cancel_keyboard(booking_id):
+    """Подтверждение отказа от записи со стороны клиента"""
+    markup = types.InlineKeyboardMarkup()
+    markup.add(
+        types.InlineKeyboardButton("✅ Да, отказаться", callback_data=f"confirm_my_cancel_{booking_id}"),
+        types.InlineKeyboardButton("◀️ Назад", callback_data="my_bookings"),
+    )
+    return markup
+
 def get_admin_bookings_keyboard(bookings):
     markup = types.InlineKeyboardMarkup()
-    status_map = {'pending': '⏳', 'confirmed': '✅', 'cancelled': '❌', 'completed': '✨'}
+    status_map = {'pending': '⏳', 'confirmed': '✅', 'cancelled': '❌',
+                  'client_cancelled': '🚫', 'completed': '✨'}
     for b in bookings[:10]:
         markup.add(types.InlineKeyboardButton(
             text=f"{status_map.get(b['status'], '⚠️')} #{b['id']} — {b['date_time'][:16]}",
@@ -233,12 +254,13 @@ def get_admin_bookings_keyboard(bookings):
     markup.add(types.InlineKeyboardButton("◀️ В админку", callback_data="admin"))
     return markup
 
-def get_admin_booking_actions(booking_id):
+def get_admin_booking_actions(booking_id, status=None):
     markup = types.InlineKeyboardMarkup()
-    markup.add(
-        types.InlineKeyboardButton("✅ Подтвердить", callback_data=f"ab_confirm_{booking_id}"),
-        types.InlineKeyboardButton("✨ Завершить", callback_data=f"ab_complete_{booking_id}"),
-    )
+    if status != 'client_cancelled':
+        markup.add(
+            types.InlineKeyboardButton("✅ Подтвердить", callback_data=f"ab_confirm_{booking_id}"),
+            types.InlineKeyboardButton("✨ Завершить", callback_data=f"ab_complete_{booking_id}"),
+        )
     markup.add(
         types.InlineKeyboardButton("❌ Отменить", callback_data=f"ab_cancel_{booking_id}"),
         types.InlineKeyboardButton("💬 Написать клиенту", callback_data=f"ab_msg_{booking_id}"),
