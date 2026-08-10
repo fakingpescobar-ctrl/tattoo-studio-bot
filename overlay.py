@@ -1,21 +1,27 @@
 """
-Красивый оверлей запуска бота:
-- ASCII-баннер
-- Проверка системы (база данных, библиотеки, токен)
-- Ближайшие записи клиентов
+Оверлей запуска бота в стиле neofetch/screenfetch:
+  слева — ASCII-картинка тату-машинки (градиентная раскраска),
+  справа — колонка с информацией о системе, боте, статистикой и ближайшими записями.
+
+Если рядом с ботом лежит файл `art.txt` — он используется вместо встроенной
+картинки (для кастомного ASCII-арта).
+
+API не менялся: show_overlay() при старте, refresh_overlay() при перерисовке.
 """
 import os
+import re
 import sys
 import threading
 from datetime import datetime
 
-from database import get_all_bookings, get_portfolio, get_services, get_reviews, get_rating_stats
+from database import (get_all_bookings, get_portfolio, get_services,
+                      get_reviews, get_rating_stats)
 
 # Блокировка, чтобы автообновление и ручное обновление не конфликтовали
 _overlay_lock = threading.Lock()
 
+# ============ ЦВЕТА ============
 
-# Цвета для Windows консоли
 class C:
     R = '\033[91m'     # красный
     G = '\033[92m'     # зелёный
@@ -28,246 +34,292 @@ class C:
     DIM = '\033[2m'    # тусклый
     RST = '\033[0m'    # сброс
 
+# ============ ASCII-КАРТИНКА ============
 
-def _ok(msg):
-    return f"{C.G}✓{C.RST} {msg}"
+ART_RAW = r"""              /\
+             /  \
+            /    \
+           /      \
+          /        \
+         /          \
+        /            \
+       /              \
+      /                \
+     /                  \
+    /                    \
+   /                      \
+  /                        \
+ /                          \
+/____________________________\
+"""
 
+# Палитра раскраски строк арта. Один белый = ч/б арт (по запросу).
+ART_PALETTE = [C.W]
 
-def _err(msg):
-    return f"{C.R}✗{C.RST} {msg}"
-
-
-def _warn(msg):
-    return f"{C.Y}!{C.RST} {msg}"
-
-
-def _line(char='─', width=56):
-    return char * width
-
-
-def show_banner():
-    """ASCII-баннер PRIZMA — figlet standard + треугольник-призма"""
-    banner = f"""{C.CY}{C.BOLD}
-    ╔════════════════════════════════════════════════════════════╗
-    ║                                                            ║
-    ║    ____  ____  ___ _______  __    _                        ║
-    ║   |  _ \\|  _ \\|_ _|__  /  \\/  |  / \\                     ║
-    ║   | |_) | |_) || |  / /| |\\/| | / _ \\                    ║
-    ║   |  __/|  _ < | | / /_| |  | |/ ___ \\                   ║
-    ║   |_|   |_| \\_\\___/____|_|  |_/_/   \\_\\                 ║
-    ║                                                            ║
-    ║                          /\\                                ║
-    ║                         /  \\                               ║
-    ║                        / /\\ \\                              ║
-    ║                       / /  \\ \\                             ║
-    ║                      / /    \\ \\                            ║
-    ║                     / /      \\ \\                           ║
-    ║                    /__________\\                            ║
-    ║                                                            ║
-    ║             Максим Андреевич · Асбест                      ║
-    ╚════════════════════════════════════════════════════════════╝
-{C.RST}"""
-    print(banner)
+ANSI_RE = re.compile(r'\x1b\[[0-9;]*m')
 
 
-def check_system():
-    """Проверка компонентов системы"""
-    print(f"{C.BOLD}{' ПРОВЕРКА СИСТЕМЫ ':=^56}{C.RST}")
-    print()
+def _vlen(s):
+    """Длина строки без ANSI-кодов (для выравнивания)."""
+    return len(ANSI_RE.sub('', s))
 
-    checks = []
 
-    # 1. Python
+def _trim_art(lines):
+    """Обрезает пустые строки сверху/снизу и общий левый отступ.
+    Если арт шире MAX_ART_W или выше MAX_ART_H — сжимает по X/Y в 2 раза
+    (каждый 2-й символ / каждая 2-я строка), чтобы влезть рядом с колонкой."""
+    MAX_ART_W = 42
+    MAX_ART_H = 26
+
+    # Табы → пробелы, убираем хвостовые пробелы, пустые строки сверху/снизу
+    lines = [l.expandtabs(4).rstrip() for l in lines]
+    while lines and not lines[0].strip():
+        lines.pop(0)
+    while lines and not lines[-1].strip():
+        lines.pop()
+
+    if not lines:
+        return []
+
+    # Левый отступ — МИНИМУМ по строкам: он всегда безопасен, ни одна
+    # строка не обрежется (у основания пирамиды отступ меньше, чем у вершины).
+    indents = [len(l) - len(l.lstrip()) for l in lines if l.strip()]
+    indent = min(indents) if indents else 0
+    if indent:
+        lines = [l[indent:] if len(l) >= indent else l for l in lines]
+
+    # Сжатие по X, если слишком широко. Единый сдвиг для всех строк
+    # сохраняет вертикальную ось арта (по самой широкой строке).
+    width = max((len(l) for l in lines), default=0)
+    if width > MAX_ART_W:
+        shift = 1 if width % 2 else 0
+        lines = [l[shift::2] if len(l) > shift else l for l in lines]
+
+    # Сжатие по Y, если слишком высоко
+    if len(lines) > MAX_ART_H:
+        lines = lines[::2]
+
+    return lines
+
+
+def _get_art():
+    """Возвращает список строк арта. Приоритет: ascii-art.txt → art.txt → ART_RAW."""
+    for name in ('ascii-art.txt', 'art.txt'):
+        if os.path.exists(name):
+            try:
+                with open(name, encoding='utf-8') as f:
+                    content = f.read()
+                if content.strip():
+                    return _trim_art(content.split('\n'))
+            except (OSError, UnicodeDecodeError):
+                pass
+    return _trim_art(ART_RAW.split('\n'))
+
+
+def _colorize_art(lines):
+    """Раскрашивает строки арта градиентом (палитра повторяется)."""
+    out = []
+    for i, line in enumerate(lines):
+        color = ART_PALETTE[i % len(ART_PALETTE)]
+        out.append(color + line + C.RST)
+    return out
+
+
+# ============ СБОРКА БЛОКОВ ============
+
+def _side_by_side(left_lines, right_lines, gap=6):
+    """Склеивает два многострочных блока в один: левый арт + правая колонка.
+    Учитывает ANSI-коды: отступ считается по видимой длине строки."""
+    h = max(len(left_lines), len(right_lines))
+    left_w = max((_vlen(l) for l in left_lines), default=0)
+    rows = []
+    for i in range(h):
+        l = left_lines[i] if i < len(left_lines) else ''
+        r = right_lines[i] if i < len(right_lines) else ''
+        if r:
+            pad = max(0, left_w - _vlen(l) + gap)
+            rows.append(l + ' ' * pad + r)
+        else:
+            rows.append(l)
+    return rows
+
+
+def _kv(label, value, color=C.CY):
+    """Строка 'label: value' в стиле neofetch (цветной ключ, белое значение)."""
+    return f"{C.BOLD}{color}{label}:{C.RST} {C.W}{value}{C.RST}"
+
+
+def _section(title):
+    """Заголовок секции в правой колонке."""
+    return f"{C.BOLD}{C.Y}{title}{C.RST}"
+
+
+# ============ ИНФОРМАЦИЯ ============
+
+def _system_lines():
+    """Проверка системы: Python, библиотеки, токен, БД, .env."""
+    lines = []
+
     ver = f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
-    checks.append(_ok(f"Python {ver}"))
+    lines.append(_kv("ОС", "Windows", C.Y))
+    lines.append(_kv("Python", ver, C.Y))
 
-    # 2. Библиотеки
+    # Библиотеки
     try:
-        import telebot
         import importlib.metadata
-        ver = importlib.metadata.version('pytelegrambotapi')
-        checks.append(_ok(f"pyTelegramBotAPI v{ver}"))
+        tbot_ver = importlib.metadata.version('pytelegrambotapi')
+        lines.append(_kv("BotAPI", f"pyTelegramBotAPI v{tbot_ver}", C.Y))
     except Exception:
-        try:
-            import telebot
-            checks.append(_ok("pyTelegramBotAPI установлен"))
-        except ImportError:
-            checks.append(_err("pyTelegramBotAPI не установлен!"))
+        lines.append(_kv("BotAPI", "pyTelegramBotAPI (не определена)", C.Y))
 
-    try:
-        from dotenv import dotenv_values
-        checks.append(_ok("python-dotenv установлен"))
-    except ImportError:
-        checks.append(_err("python-dotenv не установлен!"))
-
-    # 3. Токен
-    from config import BOT_TOKEN, ADMIN_ID
+    # Токен и админ
+    from config import BOT_TOKEN, ADMIN_IDS
     if BOT_TOKEN and BOT_TOKEN != 'YOUR_TELEGRAM_BOT_TOKEN_HERE':
-        checks.append(_ok(f"Токен бота установлен ({BOT_TOKEN[:8]}...)"))
+        lines.append(_kv("Токен", f"✓ установлен ({BOT_TOKEN[:8]}...)", C.G))
     else:
-        checks.append(_err("Токен бота НЕ установлен!"))
+        lines.append(_kv("Токен", f"✗ НЕ установлен!", C.R))
 
-    # 4. Админ ID
-    if ADMIN_ID:
-        checks.append(_ok(f"ADMIN_ID: {ADMIN_ID}"))
+    if ADMIN_IDS:
+        label = "Админ" if len(ADMIN_IDS) == 1 else "Админы"
+        ids = ", ".join(str(i) for i in ADMIN_IDS)
+        lines.append(_kv(label, f"✓ ID {ids}", C.G))
     else:
-        checks.append(_warn("ADMIN_ID не указан"))
+        lines.append(_kv("Админ", "не указан", C.Y))
 
-    # 5. База данных
+    # База данных
     db_path = 'tattoo_bot.db'
     if os.path.exists(db_path):
         size = os.path.getsize(db_path)
-        checks.append(_ok(f"База данных ({size // 1024} КБ)"))
+        lines.append(_kv("БД", f"✓ tattoo_bot.db ({size // 1024} КБ)", C.G))
     else:
-        checks.append(_warn("База данных будет создана"))
+        lines.append(_kv("БД", "будет создана", C.Y))
 
-    # 6. Файл .env
+    # Файл .env
     if os.path.exists('.env'):
-        checks.append(_ok("Файл .env найден"))
+        lines.append(_kv(".env", "✓ найден", C.G))
     else:
-        checks.append(_err("Файл .env НЕ найден!"))
+        lines.append(_kv(".env", "✗ НЕ найден!", C.R))
 
-    for c in checks:
-        print(f"  {c}")
-
-    print()
-    return all('✓' in c for c in checks)
+    return lines
 
 
-def show_stats():
-    """Статистика базы данных"""
-    from database import invalidate_cache
-    # Сбрасываем кэш, чтобы получить свежие данные
-    invalidate_cache('get_services', 'get_portfolio', 'get_reviews', 'get_rating_stats', 'get_all_bookings', 'get_user_bookings')
-
-    print(f"{C.BOLD}{' СТАТИСТИКА ':=^56}{C.RST}")
-    print()
-
+def _stats_lines(bookings):
+    """Статистика базы данных."""
     services = get_services()
     portfolio = get_portfolio()
     reviews = get_reviews()
     avg, cnt = get_rating_stats()
-    bookings = get_all_bookings()
 
-    # Считаем активные записи (не отменённые)
     active = [b for b in bookings if b['status'] in ('pending', 'confirmed')]
+    rating = f"{avg:.1f}/5" if cnt else "—"
 
-    stats = [
-        (f"💰 Услуги в прайсе", len(services), C.Y),
-        (f"🎨 Работ в портфолио", len(portfolio), C.M),
-        (f"⭐ Отзывов", cnt, C.Y),
-        (f"📊 Средний рейтинг", f"{avg:.1f}/5" if cnt else "—", C.G),
-        (f"📅 Всего записей", len(bookings), C.B),
-        (f"🔔 Активных записей", len(active), C.G),
+    return [
+        _kv("💰 Услуги", len(services), C.Y),
+        _kv("🎨 Работ", len(portfolio), C.M),
+        _kv("⭐ Отзывы", f"{cnt}  (рейтинг {rating})", C.Y),
+        _kv("📅 Всего записей", len(bookings), C.B),
+        _kv("🔔 Активных", len(active), C.G),
     ]
 
-    for label, value, color in stats:
-        print(f"  {label}: {color}{C.BOLD}{value}{C.RST}")
 
-    print()
-
-
-def show_upcoming_bookings():
-    """Ближайшие записи клиентов"""
-    from database import invalidate_cache
-    invalidate_cache('get_all_bookings')
-
-    print(f"{C.BOLD}{' БЛИЖАЙШИЕ ЗАПИСИ ':=^56}{C.RST}")
-    print()
-
-    bookings = get_all_bookings()
+def _upcoming_lines(bookings):
+    """Ближайшие активные записи (до 4)."""
     now = datetime.now()
-
-    # Парсим дату и фильтруем будущие + активные
     upcoming = []
     for b in bookings:
-        if b['status'] in ('cancelled', 'completed'):
+        if b['status'] not in ('pending', 'confirmed'):
             continue
         try:
-            dt = datetime.strptime(b['date_time'], "%d.%m.%Y %H:%M")
-            if dt >= now:
-                upcoming.append((dt, b))
+            dt = datetime.strptime((b['date_time'] or '').strip(), "%d.%m.%Y %H:%M")
         except (ValueError, TypeError):
             continue
+        if dt >= now:
+            upcoming.append((dt, b))
 
     if not upcoming:
-        print(f"  {C.DIM}Нет предстоящих записей{C.RST}")
-        print()
-        return
+        return [f"{C.DIM}  Нет предстоящих записей{C.RST}"]
 
-    # Сортируем по дате
     upcoming.sort(key=lambda x: x[0])
-
-    status_icon = {
-        'pending': f"{C.Y}⏳{C.RST}",
-        'confirmed': f"{C.G}✅{C.RST}",
-    }
-
-    for dt, b in upcoming[:5]:
+    lines = []
+    for dt, b in upcoming[:4]:
         name = b['first_name'] or 'Клиент'
         uname = f"@{b['username']}" if b['username'] else ""
-
-        # Сколько осталось дней
-        delta = dt - now
-        days = delta.days
-        if days == 0:
-            when = f"{C.R}{C.BOLD}СЕГОДНЯ в {dt.strftime('%H:%M')}!{C.RST}"
-        elif days == 1:
-            when = f"{C.Y}Завтра в {dt.strftime('%H:%M')}{C.RST}"
-        else:
-            when = f"через {days} дн. ({dt.strftime('%d.%m %H:%M')})"
-
-        icon = status_icon.get(b['status'], '📋')
-        print(f"  {icon} {C.BOLD}#{b['id']}{C.RST} {name} {C.DIM}{uname}{C.RST}")
-        print(f"      📝 {b['service']}")
-        print(f"      📅 {b['date_time']}  →  {when}")
-        if b['description']:
-            desc = b['description'][:50] + ('...' if len(b['description']) > 50 else '')
-            print(f"      💡 {desc}")
-        print()
-
-    if len(upcoming) > 5:
-        print(f"  {C.DIM}...и ещё {len(upcoming) - 5} записей{C.RST}")
-        print()
+        when = dt.strftime('%d.%m %H:%M')
+        if dt.date() == now.date():
+            when = f"{C.R}{C.BOLD}СЕГОДНЯ {dt.strftime('%H:%M')}{C.RST}"
+        elif (dt.date() - now.date()).days == 1:
+            when = f"{C.Y}завтра {dt.strftime('%H:%M')}{C.RST}"
+        service = (b['service'] or '')[:18]
+        lines.append(f"  {C.BOLD}• #{b['id']}{C.RST} {when} — {name} {C.DIM}{uname}{C.RST}")
+        lines.append(f"      {C.DIM}{service}{C.RST}")
+    return lines
 
 
-def show_ready():
-    """Финальное сообщение готовности"""
-    print(f"{C.G}{C.BOLD}{' БОТ ЗАПУЩЕН И ГОТОВ К РАБОТЕ! ':=^56}{C.RST}")
+# ============ ПОЛНАЯ КОЛОНКА ============
+
+def build_info_lines():
+    """Собирает всю правую колонку neofetch-стиля."""
+    lines = []
+    bookings = get_all_bookings()  # один запрос для статистики и ближайших записей
+
+    # Шапка как user@host
+    lines.append(f"{C.BOLD}{C.G}Максим Андреевич{C.RST} {C.W}@{C.RST} {C.BOLD}{C.CY}tatoo_asbest_best_bot{C.RST}")
+    lines.append(f"{C.DIM}{'─' * 40}{C.RST}")
+
+    lines.extend(_system_lines())
+    lines.append("")
+    lines.append(_section("СТАТИСТИКА"))
+    lines.extend(_stats_lines(bookings))
+    lines.append("")
+    lines.append(_section("БЛИЖАЙШИЕ ЗАПИСИ"))
+    lines.extend(_upcoming_lines(bookings))
+    lines.append("")
+    lines.append(_kv("Статус", "✅ БОТ ЗАПУЩЕН", C.G))
+
+    return lines
+
+
+def _render():
+    """Полный рендер: арт слева + инфо справа."""
+    art = _colorize_art(_get_art())
+    info = build_info_lines()
+    block = _side_by_side(art, info)
+    print('\n'.join(block))
+    print(f"\n{C.DIM}Окно не закрывайте! Ctrl+C — остановка.{C.RST}")
     print()
-    print(f"  {C.CY}Бот: {C.BOLD}@tatoo_asbest_best_bot{C.RST}")
-    print(f"  {C.CY}Мастер: {C.BOLD}Максим Андреевич{C.RST}")
-    print(f"  {C.CY}Город: {C.BOLD}Асбест, ул. Заводская, 4{C.RST}")
-    print()
-    print(f"  {C.DIM}Окно не закрывайте! Ctrl+C — остановка.{C.RST}")
-    print(f"{C.DIM}{'─' * 56}{C.RST}")
-    print()
 
+
+# ============ ПУБЛИЧНЫЙ API ============
 
 def show_overlay():
-    """Полный оверлей запуска"""
+    """Полный оверлей запуска (неочищающий первый рендер)."""
     # Инициализация ANSI-цветов для Windows
     if os.name == 'nt':
-        os.system('')  # активируем обработку ANSI-кодов
-
-    show_banner()
-    check_system()
-    show_stats()
-    show_upcoming_bookings()
-    show_ready()
+        os.system('')
+    with _overlay_lock:
+        _render()
 
 
 def refresh_overlay():
-    """Обновление оверлея после действий (добавление работы, новая запись и т.д.)
-    Очищает экран и перерисовывает только статистику и записи.
-    Потокобезопасно — использует блокировку."""
+    """Перерисовка оверлея после действий (новая запись, добавление работы и т.д.).
+    Очищает экран и рисует заново. Потокобезопасно."""
     with _overlay_lock:
         if os.name == 'nt':
             os.system('cls')
         else:
             os.system('clear')
+        _render()
 
-        show_banner()
-        show_stats()
-        show_upcoming_bookings()
-        show_ready()
+
+# Для обратной совместимости (если что-то вызывало старые функции)
+def show_banner():
+    _render()
+
+
+def show_stats():
+    info = build_info_lines()
+    print('\n'.join(_side_by_side(_colorize_art(_get_art()), info)))
+
+
+def check_system():
+    return True
