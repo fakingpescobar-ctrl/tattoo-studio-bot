@@ -1,4 +1,5 @@
 pyTelegramBotAPI==4.36.1
+requests>=2.31.0
 python-dotenv==1.0.0
 
 # Dev dependencies (для тестов)
