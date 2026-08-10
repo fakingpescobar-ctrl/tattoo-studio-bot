@@ -15,7 +15,7 @@ from config import BOT_TOKEN, ADMIN_ID
 from collections import defaultdict
 from database import *
 from keyboards import *
-from overlay import show_overlay
+from admin_panel import run_admin_panel
 from logging.handlers import RotatingFileHandler
 
 # Настройка логирования — только в файл (консоль зарезервирована под оверлей)
@@ -69,25 +69,35 @@ if __name__ == "__main__":
     get_reviews()
     get_user_bookings(ADMIN_ID)
     logger.info("Cache warmed!")
+    # Админ-панель (tkinter GUI) в daemon-потоке.
+    # Fallback на консольный overlay если tkinter недоступен.
     try:
-        show_overlay()
-    except Exception as e:
-        logger.error(f"Overlay error: {e}")
+        import tkinter  # noqa: F401
+        gui_thread = threading.Thread(target=run_admin_panel, daemon=True)
+        gui_thread.start()
+        logger.info("Admin panel (tkinter) started in background thread")
+    except ImportError:
+        logger.warning("tkinter unavailable — falling back to console overlay")
+        try:
+            from overlay import show_overlay
+            show_overlay()
+        except Exception as e:
+            logger.error(f"Overlay error: {e}")
 
-    # Фоновый поток автообновления оверлея каждые 30 секунд
-    def overlay_refresh_loop():
-        time.sleep(10)  # ждём после первого показа
-        while True:
-            try:
-                from overlay import refresh_overlay
-                refresh_overlay()
-            except Exception as e:
-                logger.error(f"Overlay refresh error: {e}")
-            time.sleep(30)  # обновляем каждые 30 секунд
-
-    refresh_thread = threading.Thread(target=overlay_refresh_loop, daemon=True)
-    refresh_thread.start()
-    logger.info("Overlay auto-refresh started (every 30s)")
+    # Фоновый поток автообновления консольного оверлея (только если GUI не запущен)
+    if 'gui_thread' not in dir():
+        def overlay_refresh_loop():
+            time.sleep(10)
+            while True:
+                try:
+                    from overlay import refresh_overlay
+                    refresh_overlay()
+                except Exception as e:
+                    logger.error(f"Overlay refresh error: {e}")
+                time.sleep(30)
+        refresh_thread = threading.Thread(target=overlay_refresh_loop, daemon=True)
+        refresh_thread.start()
+        logger.info("Overlay auto-refresh started (every 30s)")
 
     # Фоновый поток напоминаний о записях (проверяет каждые 10 минут)
     def reminders_loop():
