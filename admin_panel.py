@@ -1,9 +1,9 @@
 """
 Нативная админ-панель Windows на tkinter.
 
+Стилистика: ретро чёрно-жёлто-фиолетовая.
 Запускается отдельным daemon-потоком из main.py / max_main.py.
 Читает данные напрямую из database.py (потокобезопасно — каждое соединение своё).
-Только этот поток трогает tk-виджеты; обновление через root.after(мс, callback).
 
 Запуск standalone:  python admin_panel.py
 """
@@ -16,39 +16,57 @@ from datetime import datetime
 from tkinter import messagebox, ttk
 
 from config import BOT_CITY, BOT_HANDLE, BOT_MASTER, BOT_NAME
-from database import (delete_portfolio_work, get_all_bookings,
+from database import (delete_booking, delete_portfolio_work, get_all_bookings,
                       get_portfolio, get_rating_stats, get_reviews,
                       get_services, update_booking_status)
 
 # Момент старта — для аптайма в шапке
 _started_at = time.monotonic()
 
-# Потокобезопасный канал: внешние потоки (bot) могут push-уведомления
-# через panel_notify(), GUI подхватит через after().
+# Потокобезопасный канал уведомлений
 _notify_queue: list = []
 _notify_lock = threading.Lock()
 
 
-# ============ ВОТЧЕР ФАЙЛА БД (живое обновление) ============
-
-def _db_mtime():
-    try:
-        from config import DB_PATH
-        return os.path.getmtime(DB_PATH)
-    except OSError:
-        return 0
-
-
-# ============ КАНAЛ УВЕДОМЛЕНИЙ ============
-
 def panel_notify(text):
-    """Позволяет главному потоку (боту) отправить уведомление в панель.
-    Безопасно вызывать из любого потока."""
+    """Позволяет главному потоку (боту) отправить уведомление в панель."""
     with _notify_lock:
         _notify_queue.append(text)
 
 
-# ============ ЦВЕТА СТАТУСОВ ============
+# ============ РЕТРО ПАЛИТРА ============
+
+class Palette:
+    """Чёрно-жёлто-фиолетовая ретро-палитра."""
+    BG         = '#0d0d1a'  # глубокий чёрный с синим отливом
+    BG_PANEL   = '#1a1a2e'  # фон панелей
+    BG_CARD    = '#16213e'  # фон карточек
+    BG_INPUT   = '#0f0f23'  # фон полей ввода
+    YELLOW     = '#ffd60a'  # основной жёлтый (акцент)
+    YELLOW_DIM = '#c9a227'  # тёмный жёлтый
+    PURPLE     = '#9d4edd'  # основной фиолетовый
+    PURPLE_DIM = '#5a189a'  # тёмный фиолетовый
+    TEXT       = '#e0e0e0'  # основной текст
+    TEXT_DIM   = '#8888aa'  # приглушённый текст
+    RED        = '#ff4757'
+    GREEN      = '#2ed573'
+    ORANGE     = '#ff8c42'
+    # Статусы записей (цветные badge-фоны)
+    STATUS_BG = {
+        'pending':          '#3d3d1f',  # тёмно-жёлтый
+        'confirmed':        '#1f3d2a',  # тёмно-зелёный
+        'completed':        '#1f2d3d',  # тёмно-голубой
+        'cancelled':        '#3d1f1f',  # тёмно-красный
+        'client_cancelled': '#2d1f3d',  # тёмно-фиолетовый
+    }
+    STATUS_FG = {
+        'pending':          '#ffd60a',  # жёлтый
+        'confirmed':        '#2ed573',
+        'completed':        '#54a0ff',
+        'cancelled':        '#ff4757',
+        'client_cancelled': '#9d4edd',
+    }
+
 
 STATUS_RU = {
     'pending': '⏳ Ожидает',
@@ -58,133 +76,261 @@ STATUS_RU = {
     'client_cancelled': '🚫 Отказ клиента',
 }
 
-STATUS_TAGS = {
-    'pending': 'pending',
-    'confirmed': 'confirmed',
-    'completed': 'completed',
-    'cancelled': 'cancelled',
-    'client_cancelled': 'client_cancelled',
-}
+
+def _db_mtime():
+    try:
+        from config import DB_PATH
+        return os.path.getmtime(DB_PATH)
+    except OSError:
+        return 0
+
+
+# ============ РЕТРО СТИЛЬ ДЛЯ ttk ============
+
+def apply_retro_style(root):
+    """Применяет тёмную тему к ttk виджетам (Treeview, Scrollbar, Notebook)."""
+    style = ttk.Style(root)
+    try:
+        style.theme_use('clam')  # clam — самый кастомизируемый
+    except Exception:
+        pass
+
+    # Treeview
+    style.configure('Treeview',
+                    background=Palette.BG_CARD,
+                    foreground=Palette.TEXT,
+                    fieldbackground=Palette.BG_CARD,
+                    borderwidth=1,
+                    relief='solid',
+                    rowheight=26)
+    style.configure('Treeview.Heading',
+                    background=Palette.PURPLE_DIM,
+                    foreground=Palette.YELLOW,
+                    font=('Consolas', 10, 'bold'),
+                    relief='flat',
+                    padding=6)
+    style.map('Treeview.Heading',
+              background=[('active', Palette.PURPLE)])
+    style.map('Treeview',
+              background=[('selected', Palette.PURPLE_DIM)],
+              foreground=[('selected', Palette.YELLOW)])
+    style.configure('Vertical.TScrollbar',
+                    background=Palette.PURPLE_DIM,
+                    troughcolor=Palette.BG_PANEL,
+                    arrowcolor=Palette.YELLOW,
+                    borderwidth=0)
+
+    # Notebook (вкладки)
+    style.configure('TNotebook',
+                    background=Palette.BG,
+                    borderwidth=0)
+    style.configure('TNotebook.Tab',
+                    background=Palette.BG_PANEL,
+                    foreground=Palette.TEXT_DIM,
+                    padding=(16, 8),
+                    font=('Consolas', 10, 'bold'))
+    style.map('TNotebook.Tab',
+              background=[('selected', Palette.PURPLE_DIM)],
+              foreground=[('selected', Palette.YELLOW)])
+
+    # LabelFrame
+    style.configure('TLabelframe',
+                    background=Palette.BG_PANEL,
+                    foreground=Palette.YELLOW,
+                    borderwidth=1,
+                    relief='solid')
+    style.configure('TLabelframe.Label',
+                    background=Palette.BG_PANEL,
+                    foreground=Palette.YELLOW,
+                    font=('Consolas', 9, 'bold'))
+
+    # Combobox
+    style.configure('TCombobox',
+                    background=Palette.BG_INPUT,
+                    foreground=Palette.YELLOW,
+                    fieldbackground=Palette.BG_INPUT,
+                    arrowcolor=Palette.YELLOW,
+                    borderwidth=1)
+    style.map('TCombobox',
+              fieldbackground=[('readonly', Palette.BG_INPUT)],
+              foreground=[('readonly', Palette.YELLOW)])
+
+
+# ============ РЕТРО КНОПКА (tk) ============
+
+class RetroButton(tk.Frame):
+    """Кастомная кнопка с жёлто-фиолетовым ретро-стилем."""
+
+    def __init__(self, parent, text, command, bg=Palette.PURPLE_DIM,
+                 fg=Palette.YELLOW, hover_bg=Palette.PURPLE, width=None, **kw):
+        super().__init__(parent, bg=bg, bd=0, highlightthickness=0)
+        self._cmd = command
+        self._bg = bg
+        self._hover_bg = hover_bg
+        self.label = tk.Label(
+            self, text=text, fg=fg, bg=bg,
+            font=('Consolas', 9, 'bold'),
+            padx=12, pady=6, cursor='hand2',
+            highlightthickness=1,
+            highlightbackground=Palette.YELLOW_DIM,
+            highlightcolor=Palette.YELLOW,
+        )
+        self.label.pack(fill='both', expand=True)
+        self.label.bind('<Button-1>', self._click)
+        self.label.bind('<Enter>', self._hover)
+        self.label.bind('<Leave>', self._unhover)
+
+    def _click(self, _):
+        if self._cmd:
+            self._cmd()
+
+    def _hover(self, _):
+        self.label.config(bg=self._hover_bg)
+        self.config(bg=self._hover_bg)
+
+    def _unhover(self, _):
+        self.label.config(bg=self._bg)
+        self.config(bg=self._bg)
+
+
+# ============ РЕТРО КАРТОЧКА ============
+
+class RetroCard(tk.Frame):
+    """Карточка статистики в ретро-стиле."""
+
+    def __init__(self, parent, label, accent=Palette.YELLOW):
+        super().__init__(parent, bg=Palette.BG_CARD,
+                         highlightthickness=2,
+                         highlightbackground=accent,
+                         highlightcolor=accent,
+                         bd=0)
+        tk.Label(self, text=label, bg=Palette.BG_CARD,
+                 fg=Palette.TEXT_DIM,
+                 font=('Consolas', 9, 'bold')).pack(pady=(8, 0))
+        self.value_var = tk.StringVar(value="—")
+        tk.Label(self, textvariable=self.value_var,
+                 bg=Palette.BG_CARD, fg=accent,
+                 font=('Consolas', 24, 'bold')).pack(pady=(0, 8))
 
 
 # ============ ПАНЕЛЬ ============
 
 class AdminPanel(tk.Tk):
-    """Главное окно админ-панели."""
 
-    REFRESH_MS = 5000  # автообновление каждые 5 сек
+    REFRESH_MS = 5000
 
     def __init__(self):
         super().__init__()
-        self.title(f"{BOT_NAME} — Админ-панель")
-        self.geometry("960x640")
-        self.minsize(800, 500)
+        self.title(f"{BOT_NAME} — ADMIN")
+        self.geometry("980x680")
+        self.minsize(820, 560)
+        self.configure(bg=Palette.BG)
 
-        # Тёмная акцентная полоса (Windows нативный ttk этого не даст — берём tk.Frame)
-        try:
-            self.configure(bg='#1e1e2e')
-        except Exception:
-            pass
+        apply_retro_style(self)
 
         self._build_header()
         self._build_notebook()
         self._build_statusbar()
 
-        # Теги раскраски строк
-        self.tree.tag_configure('pending', background='#fff3cd')
-        self.tree.tag_configure('confirmed', background='#d4edda')
-        self.tree.tag_configure('completed', background='#d1ecf1')
-        self.tree.tag_configure('cancelled', background='#f8d7da')
-        self.tree.tag_configure('client_cancelled', background='#e2d6f3')
-
-        # Кеш времени модификации БД — чтобы не перечитывать без нужды
         self._db_mtime = _db_mtime()
-
         self._refresh_all()
         self.after(self.REFRESH_MS, self._refresh_loop)
 
     # ---------- ШАПКА ----------
 
     def _build_header(self):
-        header = ttk.Frame(self)
-        header.pack(fill='x', padx=12, pady=(10, 4))
+        header = tk.Frame(self, bg=Palette.BG_PANEL, height=56)
+        header.pack(fill='x')
+        header.pack_propagate(False)
 
-        # Левая часть: бренд
-        left = ttk.Frame(header)
-        left.pack(side='left')
-        ttk.Label(left, text=BOT_NAME,
-                  font=('Segoe UI', 18, 'bold')).pack(side='left')
-        ttk.Label(left, text=f"  ·  {BOT_MASTER}  ·  @{BOT_HANDLE}",
-                  font=('Segoe UI', 10), foreground='gray').pack(side='left', padx=4)
+        left = tk.Frame(header, bg=Palette.BG_PANEL)
+        left.pack(side='left', padx=14)
 
-        # Правая часть: аптайм
-        self.uptime_var = tk.StringVar(value="аптайм 0с")
-        ttk.Label(header, textvariable=self.uptime_var,
-                  font=('Segoe UI', 9), foreground='gray').pack(side='right')
+        # Жёлтое имя — крупно, моноширинно
+        tk.Label(left, text=f"▰ {BOT_NAME} ▰",
+                 bg=Palette.BG_PANEL, fg=Palette.YELLOW,
+                 font=('Consolas', 18, 'bold')).pack(side='left')
+        tk.Label(left, text=f"  {BOT_MASTER}  ◇  @{BOT_HANDLE}",
+                 bg=Palette.BG_PANEL, fg=Palette.PURPLE,
+                 font=('Consolas', 10)).pack(side='left', padx=8, pady=(4, 0))
+
+        self.uptime_var = tk.StringVar(value="⏱ 0с")
+        tk.Label(header, textvariable=self.uptime_var,
+                 bg=Palette.BG_PANEL, fg=Palette.TEXT_DIM,
+                 font=('Consolas', 9)).pack(side='right', padx=14)
+
+        # Тонкая жёлто-фиолетовая полоса-разделитель
+        sep = tk.Frame(self, bg=Palette.YELLOW, height=2)
+        sep.pack(fill='x')
+        sep2 = tk.Frame(self, bg=Palette.PURPLE, height=1)
+        sep2.pack(fill='x')
 
     # ---------- ВКЛАДКИ ----------
 
     def _build_notebook(self):
         self.nb = ttk.Notebook(self)
-        self.nb.pack(fill='both', expand=True, padx=12, pady=4)
+        self.nb.pack(fill='both', expand=True, padx=8, pady=8)
 
-        # Статистика
         f_stats = ttk.Frame(self.nb)
-        self.nb.add(f_stats, text="📊  Статистика")
+        self.nb.add(f_stats, text=" ▓ СТАТИСТИКА ")
         self._build_stats(f_stats)
 
-        # Записи
         f_book = ttk.Frame(self.nb)
-        self.nb.add(f_book, text="📅  Записи")
+        self.nb.add(f_book, text=" ▓ ЗАПИСИ ")
         self._build_bookings(f_book)
 
-        # Портфолио
         f_port = ttk.Frame(self.nb)
-        self.nb.add(f_port, text="🎨  Портфолио")
+        self.nb.add(f_port, text=" ▓ ПОРТФОЛИО ")
         self._build_portfolio(f_port)
 
     # ---------- СТАТИСТИКА ----------
 
     def _build_stats(self, parent):
         # Сетка карточек
-        grid = ttk.Frame(parent)
-        grid.pack(fill='both', expand=True, padx=12, pady=12)
+        grid = tk.Frame(parent, bg=Palette.BG)
+        grid.pack(fill='x', padx=12, pady=12)
 
         self.stat_vars = {}
         cards = [
-            ('services', '💰 Услуги', '#0d6efd'),
-            ('portfolio', '🎨 Работы', '#6f42c1'),
-            ('reviews', '⭐ Отзывы', '#ffc107'),
-            ('rating', '🏆 Рейтинг', '#198754'),
-            ('bookings_total', '📅 Всего записей', '#0dcaf0'),
-            ('bookings_active', '🔔 Активных', '#fd7e14'),
+            ('services', '💰 УСЛУГИ', Palette.YELLOW),
+            ('portfolio', '🎨 РАБОТЫ', Palette.PURPLE),
+            ('reviews', '⭐ ОТЗЫВЫ', Palette.YELLOW),
+            ('rating', '🏆 РЕЙТИНГ', Palette.PURPLE),
+            ('bookings_total', '📅 ВСЕГО', Palette.YELLOW),
+            ('bookings_active', '🔔 АКТИВНО', Palette.PURPLE),
         ]
-        for i, (key, label, color) in enumerate(cards):
+        for i, (key, label, accent) in enumerate(cards):
             row, col = i // 3, i % 3
-            card = ttk.LabelFrame(grid, text=label, padding=14)
-            card.grid(row=row, column=col, sticky='nsew', padx=6, pady=6)
+            card = RetroCard(grid, label, accent=accent)
+            card.grid(row=row, column=col, sticky='nsew', padx=5, pady=5)
             grid.grid_columnconfigure(col, weight=1)
-            var = tk.StringVar(value="—")
-            self.stat_vars[key] = var
-            ttk.Label(card, textvariable=var,
-                      font=('Segoe UI', 22, 'bold')).pack()
+            self.stat_vars[key] = card.value_var
 
         # Последние отзывы
-        reviews_frame = ttk.LabelFrame(parent, text="Последние отзывы", padding=8)
-        reviews_frame.pack(fill='both', expand=True, padx=12, pady=(0, 12))
+        rev_frame = tk.Frame(parent, bg=Palette.BG)
+        rev_frame.pack(fill='both', expand=True, padx=12, pady=(0, 12))
+
+        tk.Label(rev_frame, text="▌ ПОСЛЕДНИЕ ОТЗЫВЫ",
+                 bg=Palette.BG, fg=Palette.PURPLE,
+                 font=('Consolas', 10, 'bold')).pack(anchor='w', pady=(0, 4))
+
+        tree_frame = tk.Frame(rev_frame, bg=Palette.BG_CARD,
+                              highlightthickness=2,
+                              highlightbackground=Palette.PURPLE_DIM)
+        tree_frame.pack(fill='both', expand=True)
 
         cols = ('user', 'rating', 'text', 'date')
-        self.reviews_tree = ttk.Treeview(reviews_frame, columns=cols,
+        self.reviews_tree = ttk.Treeview(tree_frame, columns=cols,
                                           show='headings', height=5)
-        self.reviews_tree.heading('user', text='Клиент')
-        self.reviews_tree.heading('rating', text='Оценка')
-        self.reviews_tree.heading('text', text='Текст')
-        self.reviews_tree.heading('date', text='Дата')
+        self.reviews_tree.heading('user', text='КЛИЕНТ')
+        self.reviews_tree.heading('rating', text='ОЦЕНКА')
+        self.reviews_tree.heading('text', text='ТЕКСТ')
+        self.reviews_tree.heading('date', text='ДАТА')
         self.reviews_tree.column('user', width=120)
-        self.reviews_tree.column('rating', width=60, anchor='center')
+        self.reviews_tree.column('rating', width=80, anchor='center')
         self.reviews_tree.column('text', width=400)
         self.reviews_tree.column('date', width=120)
-        sb = ttk.Scrollbar(reviews_frame, orient='vertical',
+        sb = ttk.Scrollbar(tree_frame, orient='vertical',
                             command=self.reviews_tree.yview)
         self.reviews_tree.configure(yscrollcommand=sb.set)
         self.reviews_tree.pack(side='left', fill='both', expand=True)
@@ -194,43 +340,53 @@ class AdminPanel(tk.Tk):
 
     def _build_bookings(self, parent):
         # Фильтр
-        filt = ttk.Frame(parent)
-        filt.pack(fill='x', padx=12, pady=(8, 4))
+        filt = tk.Frame(parent, bg=Palette.BG)
+        filt.pack(fill='x', padx=12, pady=(10, 6))
 
-        ttk.Label(filt, text="Фильтр:").pack(side='left')
+        tk.Label(filt, text="ФИЛЬТР:", bg=Palette.BG, fg=Palette.YELLOW,
+                 font=('Consolas', 9, 'bold')).pack(side='left')
+
         self.status_var = tk.StringVar(value='all')
         cb_values = ['all'] + list(STATUS_RU.keys())
         cb = ttk.Combobox(filt, textvariable=self.status_var,
                           values=cb_values, state='readonly', width=18)
-        cb.pack(side='left', padx=6)
+        cb.pack(side='left', padx=8)
         cb.bind('<<ComboboxSelected>>', lambda e: self._load_bookings())
 
-        ttk.Label(filt, text="  Поиск:").pack(side='left')
+        tk.Label(filt, text="  ПОИСК:", bg=Palette.BG, fg=Palette.YELLOW,
+                 font=('Consolas', 9, 'bold')).pack(side='left')
         self.search_var = tk.StringVar()
-        entry = ttk.Entry(filt, textvariable=self.search_var, width=20)
-        entry.pack(side='left', padx=6)
+        entry = tk.Entry(filt, textvariable=self.search_var, width=22,
+                         bg=Palette.BG_INPUT, fg=Palette.YELLOW,
+                         insertbackground=Palette.YELLOW,
+                         font=('Consolas', 9), relief='solid',
+                         bd=1, highlightthickness=1,
+                         highlightbackground=Palette.PURPLE_DIM)
+        entry.pack(side='left', padx=8, ipady=3)
         entry.bind('<KeyRelease>', lambda e: self._load_bookings())
 
-        ttk.Button(filt, text="🔄 Обновить",
-                    command=self._load_bookings).pack(side='right')
+        RetroButton(filt, "⟳ ОБНОВИТЬ", self._load_bookings,
+                    bg=Palette.PURPLE_DIM, hover_bg=Palette.PURPLE).pack(side='right')
 
         # Таблица
-        tree_frame = ttk.Frame(parent)
+        tree_frame = tk.Frame(parent, bg=Palette.BG_CARD,
+                              highlightthickness=2,
+                              highlightbackground=Palette.PURPLE_DIM)
         tree_frame.pack(fill='both', expand=True, padx=12, pady=4)
 
         cols = ('id', 'client', 'service', 'date', 'status', 'desc')
         self.tree = ttk.Treeview(tree_frame, columns=cols, show='headings')
         self.tree.heading('id', text='#')
-        self.tree.heading('client', text='Клиент')
-        self.tree.heading('service', text='Услуга')
-        self.tree.heading('date', text='Дата / время')
-        self.tree.heading('status', text='Статус')
-        self.tree.heading('desc', text='Описание')
+        self.tree.heading('client', text='КЛИЕНТ')
+        self.tree.heading('service', text='УСЛУГА')
+        self.tree.heading('date', text='ДАТА / ВРЕМЯ')
+        self.tree.heading('status', text='СТАТУС')
+        self.tree.heading('desc', text='ОПИСАНИЕ')
         self.tree.column('id', width=40, anchor='center')
-        self.tree.column('client', width=140)
-        self.tree.column('service', width=160)
+        self.tree.column('client', width=150)
+        self.tree.column('service', width=150)
         self.tree.column('date', width=120, anchor='center')
-        self.tree.column('status', width=130)
+        self.tree.column('status', width=140)
         self.tree.column('desc', width=240)
 
         sb = ttk.Scrollbar(tree_frame, orient='vertical',
@@ -239,36 +395,47 @@ class AdminPanel(tk.Tk):
         self.tree.pack(side='left', fill='both', expand=True)
         sb.pack(side='right', fill='y')
 
+        # Цветные теги для строк
+        for status, bg in Palette.STATUS_BG.items():
+            self.tree.tag_configure(status, background=bg)
+
         # Кнопки действий
-        actions = ttk.Frame(parent)
-        actions.pack(fill='x', padx=12, pady=(4, 10))
-        ttk.Button(actions, text="✅ Подтвердить",
-                    command=lambda: self._set_status('confirmed')).pack(side='left', padx=3)
-        ttk.Button(actions, text="✨ Завершить",
-                    command=lambda: self._set_status('completed')).pack(side='left', padx=3)
-        ttk.Button(actions, text="❌ Отменить",
-                    command=lambda: self._set_status('cancelled')).pack(side='left', padx=3)
-        ttk.Button(actions, text="🗑 Удалить отказ",
-                    command=self._delete_client_cancelled).pack(side='left', padx=3)
+        actions = tk.Frame(parent, bg=Palette.BG)
+        actions.pack(fill='x', padx=12, pady=(6, 12))
+        RetroButton(actions, "✓ ПОДТВЕРДИТЬ",
+                    lambda: self._set_status('confirmed'),
+                    bg='#1f3d2a', hover_bg=Palette.GREEN).pack(side='left', padx=3)
+        RetroButton(actions, "✨ ЗАВЕРШИТЬ",
+                    lambda: self._set_status('completed'),
+                    bg='#1f2d3d', hover_bg='#54a0ff').pack(side='left', padx=3)
+        RetroButton(actions, "✗ ОТМЕНИТЬ",
+                    lambda: self._set_status('cancelled'),
+                    bg='#3d1f1f', hover_bg=Palette.RED).pack(side='left', padx=3)
+        RetroButton(actions, "🗑 УДАЛИТЬ",
+                    self._delete_client_cancelled,
+                    bg='#2d1f3d', hover_bg=Palette.PURPLE).pack(side='left', padx=3)
 
     # ---------- ПОРТФОЛИО ----------
 
     def _build_portfolio(self, parent):
-        top = ttk.Frame(parent)
-        top.pack(fill='x', padx=12, pady=(8, 4))
-        ttk.Label(top, text="Работы мастера",
-                  font=('Segoe UI', 11, 'bold')).pack(side='left')
-        ttk.Button(top, text="🔄 Обновить",
-                    command=self._load_portfolio).pack(side='right')
+        top = tk.Frame(parent, bg=Palette.BG)
+        top.pack(fill='x', padx=12, pady=(10, 6))
+        tk.Label(top, text="▌ РАБОТЫ МАСТЕРА",
+                 bg=Palette.BG, fg=Palette.PURPLE,
+                 font=('Consolas', 10, 'bold')).pack(side='left')
+        RetroButton(top, "⟳ ОБНОВИТЬ", self._load_portfolio,
+                    bg=Palette.PURPLE_DIM, hover_bg=Palette.PURPLE).pack(side='right')
 
-        tree_frame = ttk.Frame(parent)
+        tree_frame = tk.Frame(parent, bg=Palette.BG_CARD,
+                              highlightthickness=2,
+                              highlightbackground=Palette.PURPLE_DIM)
         tree_frame.pack(fill='both', expand=True, padx=12, pady=4)
         cols = ('id', 'title', 'style', 'desc')
         self.port_tree = ttk.Treeview(tree_frame, columns=cols, show='headings')
         self.port_tree.heading('id', text='#')
-        self.port_tree.heading('title', text='Название')
-        self.port_tree.heading('style', text='Стиль')
-        self.port_tree.heading('desc', text='Описание')
+        self.port_tree.heading('title', text='НАЗВАНИЕ')
+        self.port_tree.heading('style', text='СТИЛЬ')
+        self.port_tree.heading('desc', text='ОПИСАНИЕ')
         self.port_tree.column('id', width=40, anchor='center')
         self.port_tree.column('title', width=200)
         self.port_tree.column('style', width=120)
@@ -279,48 +446,42 @@ class AdminPanel(tk.Tk):
         self.port_tree.pack(side='left', fill='both', expand=True)
         sb.pack(side='right', fill='y')
 
-        actions = ttk.Frame(parent)
-        actions.pack(fill='x', padx=12, pady=(4, 10))
-        ttk.Button(actions, text="🗑 Удалить выбранную",
-                    command=self._delete_work).pack(side='left')
+        actions = tk.Frame(parent, bg=Palette.BG)
+        actions.pack(fill='x', padx=12, pady=(6, 12))
+        RetroButton(actions, "🗑 УДАЛИТЬ ВЫБРАННУЮ",
+                    self._delete_work,
+                    bg='#3d1f1f', hover_bg=Palette.RED).pack(side='left')
 
     # ---------- СТАТУС-БАР ----------
 
     def _build_statusbar(self):
-        bar = ttk.Frame(self, relief='sunken', padding=(8, 3))
+        bar = tk.Frame(self, bg=Palette.BG_PANEL, height=24)
         bar.pack(fill='x', side='bottom')
-        self.status_var = tk.StringVar(value="● Готово")
-        ttk.Label(bar, textvariable=self.status_var,
-                  font=('Segoe UI', 9), foreground='gray').pack(side='left')
+        bar.pack_propagate(False)
+
+        self.status_var = tk.StringVar(value="● READY")
+        tk.Label(bar, textvariable=self.status_var,
+                 bg=Palette.BG_PANEL, fg=Palette.YELLOW,
+                 font=('Consolas', 9)).pack(side='left', padx=10)
+
         self.refresh_var = tk.StringVar(value="")
-        ttk.Label(bar, textvariable=self.refresh_var,
-                  font=('Segoe UI', 9), foreground='gray').pack(side='right')
+        tk.Label(bar, textvariable=self.refresh_var,
+                 bg=Palette.BG_PANEL, fg=Palette.PURPLE,
+                 font=('Consolas', 9)).pack(side='right', padx=10)
 
-    # ---------- ОБНОВЛЕНИЕ ДАННЫХ ----------
-
-    def _db_changed(self):
-        """Проверяет, изменилась ли БД с последнего чека."""
-        mtime = _db_mtime()
-        if mtime != self._db_mtime:
-            self._db_mtime = mtime
-            return True
-        return False
+    # ---------- ОБНОВЛЕНИЕ ----------
 
     def _refresh_loop(self):
-        """Главный цикл автообновления."""
         try:
-            # Перечитываем только если БД изменилась ИЛИ вкладка активно просматривается
-            # ponytail: для простоты — всегда перечитываем, это дёшево
             self._refresh_all()
         except Exception as e:
-            self.status_var.set(f"⚠ Ошибка обновления: {e}")
+            self.status_var.set(f"⚠ ERR: {e}")
         self.after(self.REFRESH_MS, self._refresh_loop)
 
     def _refresh_all(self):
         now_str = datetime.now().strftime('%H:%M:%S')
         self.refresh_var.set(f"↻ {now_str}")
 
-        # Аптайм
         secs = int(time.monotonic() - _started_at)
         if secs < 60:
             up = f"{secs}с"
@@ -329,14 +490,13 @@ class AdminPanel(tk.Tk):
         else:
             h, m = secs // 3600, (secs % 3600) // 60
             up = f"{h}ч {m}м"
-        self.uptime_var.set(f"⏱ аптайм {up}  ·  📍 {BOT_CITY}")
+        self.uptime_var.set(f"⏱ {up}  ·  📍 {BOT_CITY}")
 
         self._load_stats()
         self._load_bookings()
         self._load_portfolio()
         self._load_reviews()
 
-        # Подхватываем уведомления из очереди
         with _notify_lock:
             notes = list(_notify_queue)
             _notify_queue.clear()
@@ -349,7 +509,6 @@ class AdminPanel(tk.Tk):
         reviews = get_reviews()
         avg, cnt = get_rating_stats()
         bookings = get_all_bookings()
-
         active = [b for b in bookings
                   if b['status'] in ('pending', 'confirmed')]
 
@@ -379,12 +538,11 @@ class AdminPanel(tk.Tk):
             row_text = f"{name} {b['service']} {desc} {status}".lower()
             if search and search not in row_text:
                 continue
-            tag = STATUS_TAGS.get(status, '')
             self.tree.insert('', 'end',
                               values=(b['id'], name, b['service'],
                                       b['date_time'], STATUS_RU.get(status, status),
                                       desc),
-                              tags=(tag,) if tag else ())
+                              tags=(status,))
 
     def _load_portfolio(self):
         if not hasattr(self, 'port_tree'):
@@ -416,7 +574,7 @@ class AdminPanel(tk.Tk):
     def _selected_booking_id(self):
         sel = self.tree.selection()
         if not sel:
-            messagebox.showinfo("Выбор", "Выберите запись в таблице.")
+            messagebox.showinfo("ВЫБОР", "Выберите запись в таблице.")
             return None
         vals = self.tree.item(sel[0])['values']
         return int(vals[0])
@@ -425,54 +583,50 @@ class AdminPanel(tk.Tk):
         bid = self._selected_booking_id()
         if bid is None:
             return
-        if messagebox.askyesno("Подтверждение",
-                                f"Изменить статус записи #{bid} на «{STATUS_RU.get(new_status, new_status)}»?"):
+        if messagebox.askyesno("ПОДТВЕРЖДЕНИЕ",
+                                f"Сменить статус записи #{bid} на «{STATUS_RU.get(new_status, new_status)}»?"):
             update_booking_status(bid, new_status)
             self._load_bookings()
             self._load_stats()
-            self.status_var.set(f"● Запись #{bid} → {STATUS_RU.get(new_status)}")
+            self.status_var.set(f"● #{bid} → {STATUS_RU.get(new_status)}")
 
     def _delete_client_cancelled(self):
         bid = self._selected_booking_id()
         if bid is None:
             return
-        if messagebox.askyesno("Удаление",
-                                f"Удалить запись #{bid} из базы?\n(используйте для очистки отказов)"):
-            from database import delete_booking
+        if messagebox.askyesno("УДАЛЕНИЕ",
+                                f"Удалить запись #{bid} из базы?"):
             delete_booking(bid)
             self._load_bookings()
             self._load_stats()
-            self.status_var.set(f"● Запись #{bid} удалена")
+            self.status_var.set(f"● #{bid} DELETED")
 
     def _delete_work(self):
         sel = self.port_tree.selection()
         if not sel:
-            messagebox.showinfo("Выбор", "Выберите работу в таблице.")
+            messagebox.showinfo("ВЫБОР", "Выберите работу в таблице.")
             return
         vals = self.port_tree.item(sel[0])['values']
         wid = int(vals[0])
         title = vals[1]
-        if messagebox.askyesno("Удаление", f"Удалить работу «{title}»?"):
+        if messagebox.askyesno("УДАЛЕНИЕ", f"Удалить работу «{title}»?"):
             delete_portfolio_work(wid)
             self._load_portfolio()
             self._load_stats()
-            self.status_var.set(f"● Работа «{title}» удалена")
+            self.status_var.set(f"● «{title}» DELETED")
 
 
 # ============ ТОЧКА ВХОДА ============
 
 def run_admin_panel():
-    """Запускает админ-панель. Блокирует вызывающий поток до закрытия окна.
-    Предназначена для запуска в daemon-потоке."""
+    """Запускает админ-панель. Блокирует вызывающий поток до закрытия окна."""
     try:
         app = AdminPanel()
         app.mainloop()
     except Exception as e:
-        # В daemon-потоке исключения тихие — выводим в stderr
         print(f"[AdminPanel] crash: {e}", file=sys.stderr)
 
 
 if __name__ == '__main__':
-    # Standalone запуск: для разработки панели без запуска бота
     print(f"Запуск {BOT_NAME} админ-панели (standalone)...")
     run_admin_panel()
