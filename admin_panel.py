@@ -54,17 +54,16 @@ def panel_notify(text):
 # ============ РЕТРО ПАЛИТРА ============
 
 class Palette:
-    """Чёрно-оранжево-фиолетовая ретро-палитра."""
+    """Чёрно-оранжевая палитра + фиолетовый только для логотипа."""
     BG         = '#000000'  # чистый чёрный
-    BG_PANEL   = '#0a0a0a'  # фон панелей (почти чёрный)
+    BG_PANEL   = '#0a0a0a'  # фон панелей
     BG_CARD    = '#121212'  # фон карточек
     BG_INPUT   = '#080808'  # фон полей ввода
-    ORANGE     = '#ff8c42'  # основной оранжевый (все цифры/буквы статистики)
-    YELLOW     = '#ffd60a'  # акцент (кнопки, статусы)
-    PURPLE     = '#9d4edd'  # основной фиолетовый
-    PURPLE_DIM = '#5a189a'  # тёмный фиолетовый
-    TEXT       = '#e0e0e0'  # основной текст
-    TEXT_DIM   = '#707080'  # приглушённый текст
+    ORANGE     = '#ff8c42'  # основной оранжевый (всё кроме логотипа)
+    ORANGE_DIM = '#b85a1a'  # тёмный оранжевый
+    PURPLE     = '#9d4edd'  # ТОЛЬКО для логотипа PRIZMA TATTOO STUDIO
+    TEXT       = '#ff8c42'  # весь текст оранжевый
+    TEXT_DIM   = '#8a5c30'  # приглушённый оранжевый
     RED        = '#ff4757'  # бот НЕ активен
     GREEN      = '#2ed573'  # бот активен
     # Статусы записей (цветные badge-фоны)
@@ -73,7 +72,7 @@ class Palette:
         'confirmed':        '#1a2a1f',  # тёмно-зелёный
         'completed':        '#1a242a',  # тёмно-голубой
         'cancelled':        '#2a1818',  # тёмно-красный
-        'client_cancelled': '#1f182a',  # тёмно-фиолетовый
+        'client_cancelled': '#241a18',  # тёмно-оранжево-красный
     }
     STATUS_FG = {
         'pending':          '#ffd60a',  # жёлтый
@@ -121,20 +120,20 @@ def apply_retro_style(root):
                     rowheight=26)
     # Заголовки таблиц — фиолетовые
     style.configure('Treeview.Heading',
-                    background=Palette.PURPLE_DIM,
-                    foreground=Palette.PURPLE,
+                    background=Palette.ORANGE_DIM,
+                    foreground=Palette.ORANGE,
                     font=('Consolas', 10, 'bold'),
                     relief='flat',
                     padding=6)
     style.map('Treeview.Heading',
-              background=[('active', Palette.PURPLE)])
+              background=[('active', Palette.ORANGE)])
     style.map('Treeview',
-              background=[('selected', Palette.PURPLE_DIM)],
+              background=[('selected', Palette.ORANGE_DIM)],
               foreground=[('selected', Palette.ORANGE)])
     style.configure('Vertical.TScrollbar',
-                    background=Palette.PURPLE_DIM,
+                    background=Palette.ORANGE_DIM,
                     troughcolor=Palette.BG_PANEL,
-                    arrowcolor=Palette.PURPLE,
+                    arrowcolor=Palette.ORANGE,
                     borderwidth=0)
 
     # Notebook (вкладки) — фиолетовый текст
@@ -143,22 +142,22 @@ def apply_retro_style(root):
                     borderwidth=0)
     style.configure('TNotebook.Tab',
                     background=Palette.BG_PANEL,
-                    foreground=Palette.PURPLE,
+                    foreground=Palette.ORANGE,
                     padding=(16, 8),
                     font=('Consolas', 10, 'bold'))
     style.map('TNotebook.Tab',
-              background=[('selected', Palette.PURPLE_DIM)],
-              foreground=[('selected', Palette.PURPLE)])
+              background=[('selected', Palette.ORANGE_DIM)],
+              foreground=[('selected', Palette.ORANGE)])
 
     # LabelFrame — фиолетовые лейблы
     style.configure('TLabelframe',
                     background=Palette.BG_PANEL,
-                    foreground=Palette.PURPLE,
+                    foreground=Palette.ORANGE,
                     borderwidth=1,
                     relief='solid')
     style.configure('TLabelframe.Label',
                     background=Palette.BG_PANEL,
-                    foreground=Palette.PURPLE,
+                    foreground=Palette.ORANGE,
                     font=('Consolas', 9, 'bold'))
 
     # Combobox
@@ -166,7 +165,7 @@ def apply_retro_style(root):
                     background=Palette.BG_INPUT,
                     foreground=Palette.ORANGE,
                     fieldbackground=Palette.BG_INPUT,
-                    arrowcolor=Palette.PURPLE,
+                    arrowcolor=Palette.ORANGE,
                     borderwidth=1)
     style.map('TCombobox',
               fieldbackground=[('readonly', Palette.BG_INPUT)],
@@ -178,8 +177,8 @@ def apply_retro_style(root):
 class RetroButton(tk.Frame):
     """Кастомная кнопка с жёлто-фиолетовым ретро-стилем."""
 
-    def __init__(self, parent, text, command, bg=Palette.PURPLE_DIM,
-                 fg=Palette.YELLOW, hover_bg=Palette.PURPLE, width=None, **kw):
+    def __init__(self, parent, text, command, bg=Palette.ORANGE_DIM,
+                 fg=Palette.ORANGE, hover_bg=Palette.ORANGE, width=None, **kw):
         super().__init__(parent, bg=bg, bd=0, highlightthickness=0)
         self._cmd = command
         self._bg = bg
@@ -189,8 +188,8 @@ class RetroButton(tk.Frame):
             font=('Consolas', 9, 'bold'),
             padx=12, pady=6, cursor='hand2',
             highlightthickness=1,
-            highlightbackground=Palette.PURPLE_DIM,
-            highlightcolor=Palette.PURPLE,
+            highlightbackground=Palette.ORANGE_DIM,
+            highlightcolor=Palette.ORANGE,
         )
         self.label.pack(fill='both', expand=True)
         self.label.bind('<Button-1>', self._click)
@@ -218,11 +217,11 @@ class RetroCard(tk.Frame):
     def __init__(self, parent, label, accent=Palette.ORANGE):
         super().__init__(parent, bg=Palette.BG_CARD,
                          highlightthickness=2,
-                         highlightbackground=Palette.PURPLE,
-                         highlightcolor=Palette.PURPLE,
+                         highlightbackground=Palette.ORANGE,
+                         highlightcolor=Palette.ORANGE,
                          bd=0)
         tk.Label(self, text=label, bg=Palette.BG_CARD,
-                 fg=Palette.PURPLE,
+                 fg=Palette.ORANGE,
                  font=('Consolas', 9, 'bold')).pack(pady=(8, 0))
         self.value_var = tk.StringVar(value="—")
         tk.Label(self, textvariable=self.value_var,
@@ -256,24 +255,36 @@ class AdminPanel(tk.Tk):
     # ---------- ШАПКА ----------
 
     def _build_header(self):
-        header = tk.Frame(self, bg=Palette.BG_PANEL, height=72)
+        # Высота шапки увеличена под ASCII-арт логотипа
+        header = tk.Frame(self, bg=Palette.BG_PANEL)
         header.pack(fill='x')
-        header.pack_propagate(False)
+        # НЕ фиксируем высоту — пусть растёт по контенту
 
-        # Левая часть: название (фиолетовым)
         left = tk.Frame(header, bg=Palette.BG_PANEL)
-        left.pack(side='left', padx=14)
+        left.pack(side='left', padx=14, pady=8)
 
-        tk.Label(left, text="▰ ПРИЗМА ТАТУ СТУДИО ▰",
+        # ANSI-style ASCII-арт логотип "PRIZMA" фиолетовым
+        logo_lines = [
+            "██████╗ ██████╗ ██╗ ██████╗██╗  ██╗",
+            "╚════██╗██╔═══██╗██║██╔═══╝██║  ██║",
+            " █████╔╝██║   ██║██║██║     ███████║",
+            " ██╔══╝ ██║   ██║██║██║     ██╔══██║",
+            "███████╗╚██████╔╝██║╚██████╗██║  ██║",
+            "╚══════╝ ╚═════╝ ╚═╝ ╚═════╝╚═╝  ╚═╝",
+        ]
+        for line in logo_lines:
+            tk.Label(left, text=line,
+                     bg=Palette.BG_PANEL, fg=Palette.PURPLE,
+                     font=('Consolas', 9, 'bold')).pack(anchor='w')
+
+        # Под логотипом — TATTOO STUDIO + мастер, фиолетовым обычным шрифтом
+        tk.Label(left, text="TATTOO STUDIO  ◇  Максим Андреевич  ◇  @tatoo_asbest_best_bot",
                  bg=Palette.BG_PANEL, fg=Palette.PURPLE,
-                 font=('Consolas', 16, 'bold')).pack(anchor='w')
-        tk.Label(left, text="МАКСИМ АНДРЕЕВИЧ  ◇  @tatoo_asbest_best_bot",
-                 bg=Palette.BG_PANEL, fg=Palette.PURPLE,
-                 font=('Consolas', 9)).pack(anchor='w', pady=(0, 0))
+                 font=('Consolas', 9, 'bold')).pack(anchor='w', pady=(4, 0))
 
         # Правая часть: индикаторы ботов + аптайм
         right = tk.Frame(header, bg=Palette.BG_PANEL)
-        right.pack(side='right', padx=14)
+        right.pack(side='right', padx=14, pady=8)
 
         # Индикаторы статуса ботов
         bots_frame = tk.Frame(right, bg=Palette.BG_PANEL)
@@ -308,7 +319,7 @@ class AdminPanel(tk.Tk):
                  bg=Palette.BG_PANEL, fg=Palette.ORANGE,
                  font=('Consolas', 9)).pack(anchor='e', pady=(4, 0))
 
-        # Тонкая фиолетово-оранжевая полоса-разделитель
+        # Полоса-разделитель: фиолетовая 2px + оранжевая 1px
         sep = tk.Frame(self, bg=Palette.PURPLE, height=2)
         sep.pack(fill='x')
         sep2 = tk.Frame(self, bg=Palette.ORANGE, height=1)
@@ -341,12 +352,12 @@ class AdminPanel(tk.Tk):
 
         self.stat_vars = {}
         cards = [
-            ('services', '💰 УСЛУГИ', Palette.YELLOW),
-            ('portfolio', '🎨 РАБОТЫ', Palette.PURPLE),
-            ('reviews', '⭐ ОТЗЫВЫ', Palette.YELLOW),
-            ('rating', '🏆 РЕЙТИНГ', Palette.PURPLE),
-            ('bookings_total', '📅 ВСЕГО', Palette.YELLOW),
-            ('bookings_active', '🔔 АКТИВНО', Palette.PURPLE),
+            ('services', '💰 УСЛУГИ', Palette.ORANGE),
+            ('portfolio', '🎨 РАБОТЫ', Palette.ORANGE),
+            ('reviews', '⭐ ОТЗЫВЫ', Palette.ORANGE),
+            ('rating', '🏆 РЕЙТИНГ', Palette.ORANGE),
+            ('bookings_total', '📅 ВСЕГО', Palette.ORANGE),
+            ('bookings_active', '🔔 АКТИВНО', Palette.ORANGE),
         ]
         for i, (key, label, accent) in enumerate(cards):
             row, col = i // 3, i % 3
@@ -360,12 +371,12 @@ class AdminPanel(tk.Tk):
         rev_frame.pack(fill='both', expand=True, padx=12, pady=(0, 12))
 
         tk.Label(rev_frame, text="▌ ПОСЛЕДНИЕ ОТЗЫВЫ",
-                 bg=Palette.BG, fg=Palette.PURPLE,
+                 bg=Palette.BG, fg=Palette.ORANGE,
                  font=('Consolas', 10, 'bold')).pack(anchor='w', pady=(0, 4))
 
         tree_frame = tk.Frame(rev_frame, bg=Palette.BG_CARD,
                               highlightthickness=2,
-                              highlightbackground=Palette.PURPLE_DIM)
+                              highlightbackground=Palette.ORANGE_DIM)
         tree_frame.pack(fill='both', expand=True)
 
         cols = ('user', 'rating', 'text', 'date')
@@ -392,7 +403,7 @@ class AdminPanel(tk.Tk):
         filt = tk.Frame(parent, bg=Palette.BG)
         filt.pack(fill='x', padx=12, pady=(10, 6))
 
-        tk.Label(filt, text="ФИЛЬТР:", bg=Palette.BG, fg=Palette.PURPLE,
+        tk.Label(filt, text="ФИЛЬТР:", bg=Palette.BG, fg=Palette.ORANGE,
                  font=('Consolas', 9, 'bold')).pack(side='left')
 
         self.status_var = tk.StringVar(value='all')
@@ -402,7 +413,7 @@ class AdminPanel(tk.Tk):
         cb.pack(side='left', padx=8)
         cb.bind('<<ComboboxSelected>>', lambda e: self._load_bookings())
 
-        tk.Label(filt, text="  ПОИСК:", bg=Palette.BG, fg=Palette.PURPLE,
+        tk.Label(filt, text="  ПОИСК:", bg=Palette.BG, fg=Palette.ORANGE,
                  font=('Consolas', 9, 'bold')).pack(side='left')
         self.search_var = tk.StringVar()
         entry = tk.Entry(filt, textvariable=self.search_var, width=22,
@@ -410,17 +421,17 @@ class AdminPanel(tk.Tk):
                          insertbackground=Palette.ORANGE,
                          font=('Consolas', 9), relief='solid',
                          bd=1, highlightthickness=1,
-                         highlightbackground=Palette.PURPLE_DIM)
+                         highlightbackground=Palette.ORANGE_DIM)
         entry.pack(side='left', padx=8, ipady=3)
         entry.bind('<KeyRelease>', lambda e: self._load_bookings())
 
         RetroButton(filt, "⟳ ОБНОВИТЬ", self._load_bookings,
-                    bg=Palette.PURPLE_DIM, hover_bg=Palette.PURPLE).pack(side='right')
+                    bg=Palette.ORANGE_DIM, hover_bg=Palette.ORANGE).pack(side='right')
 
         # Таблица
         tree_frame = tk.Frame(parent, bg=Palette.BG_CARD,
                               highlightthickness=2,
-                              highlightbackground=Palette.PURPLE_DIM)
+                              highlightbackground=Palette.ORANGE_DIM)
         tree_frame.pack(fill='both', expand=True, padx=12, pady=4)
 
         cols = ('id', 'client', 'service', 'date', 'status', 'desc')
@@ -462,7 +473,7 @@ class AdminPanel(tk.Tk):
                     bg='#3d1f1f', hover_bg=Palette.RED).pack(side='left', padx=3)
         RetroButton(actions, "🗑 УДАЛИТЬ",
                     self._delete_client_cancelled,
-                    bg='#2d1f3d', hover_bg=Palette.PURPLE).pack(side='left', padx=3)
+                    bg='#2d1f3d', hover_bg=Palette.ORANGE).pack(side='left', padx=3)
 
     # ---------- ПОРТФОЛИО ----------
 
@@ -470,14 +481,14 @@ class AdminPanel(tk.Tk):
         top = tk.Frame(parent, bg=Palette.BG)
         top.pack(fill='x', padx=12, pady=(10, 6))
         tk.Label(top, text="▌ РАБОТЫ МАСТЕРА",
-                 bg=Palette.BG, fg=Palette.PURPLE,
+                 bg=Palette.BG, fg=Palette.ORANGE,
                  font=('Consolas', 10, 'bold')).pack(side='left')
         RetroButton(top, "⟳ ОБНОВИТЬ", self._load_portfolio,
-                    bg=Palette.PURPLE_DIM, hover_bg=Palette.PURPLE).pack(side='right')
+                    bg=Palette.ORANGE_DIM, hover_bg=Palette.ORANGE).pack(side='right')
 
         tree_frame = tk.Frame(parent, bg=Palette.BG_CARD,
                               highlightthickness=2,
-                              highlightbackground=Palette.PURPLE_DIM)
+                              highlightbackground=Palette.ORANGE_DIM)
         tree_frame.pack(fill='both', expand=True, padx=12, pady=4)
         cols = ('id', 'title', 'style', 'desc')
         self.port_tree = ttk.Treeview(tree_frame, columns=cols, show='headings')
@@ -515,7 +526,7 @@ class AdminPanel(tk.Tk):
 
         self.refresh_var = tk.StringVar(value="")
         tk.Label(bar, textvariable=self.refresh_var,
-                 bg=Palette.BG_PANEL, fg=Palette.PURPLE,
+                 bg=Palette.BG_PANEL, fg=Palette.ORANGE,
                  font=('Consolas', 9)).pack(side='right', padx=10)
 
     # ---------- ОБНОВЛЕНИЕ ----------
