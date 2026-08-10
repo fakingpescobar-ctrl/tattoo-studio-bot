@@ -6,6 +6,12 @@ load_dotenv()
 # Путь к базе данных (можно переопределить через .env)
 DB_PATH = os.getenv('DB_PATH', 'tattoo_bot.db')
 
+# ==== Бренд / отображение ====
+BOT_NAME = os.getenv('BOT_NAME', 'PRIZMA')          # отображаемое имя в оверлее
+BOT_MASTER = os.getenv('BOT_MASTER', 'Максим Андреевич')  # мастер
+BOT_HANDLE = os.getenv('BOT_HANDLE', 'tatoo_asbest_best_bot')  # username бота (без @)
+BOT_CITY = os.getenv('BOT_CITY', 'Асбест, ул. Заводская, 4')
+
 BOT_TOKEN = os.getenv('BOT_TOKEN')
 if not BOT_TOKEN:
     print("[ERROR] BOT_TOKEN не найден в .env!")

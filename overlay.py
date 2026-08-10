@@ -1,60 +1,91 @@
 """
-Оверлей запуска бота в стиле neofetch/screenfetch:
-  слева — ASCII-картинка тату-машинки (градиентная раскраска),
-  справа — колонка с информацией о системе, боте, статистикой и ближайшими записями.
+Оверлей запуска бота в стиле neofetch:
+  слева — ASCII-арт тату-машинки (truecolor-градиент cyan→magenta),
+  справа — колонка с информацией о системе, статистикой и ближайшими записями.
 
-Если рядом с ботом лежит файл `art.txt` — он используется вместо встроенной
-картинки (для кастомного ASCII-арта).
+Особенности редизайна:
+  • truecolor (24-бит) градиент для арта
+  • вертикальное центрирование арта относительно инфо-колонки
+  • компактная компоновка без пустых дыр
+  • UTF-8 stdout reconfigure — не падает на cp1251/cp866 консолях
+  •的品牌-параметры из config.py (BOT_NAME, BOT_MASTER, ...)
+
+Внешний арт: положите рядом `ascii-art.txt` или `art.txt`.
 
 API не менялся: show_overlay() при старте, refresh_overlay() при перерисовке.
 """
+import io
 import os
 import re
 import sys
 import threading
+import time
 from datetime import datetime
 
+from config import BOT_NAME, BOT_MASTER, BOT_HANDLE, BOT_CITY, DB_PATH
 from database import (get_all_bookings, get_portfolio, get_services,
                       get_reviews, get_rating_stats)
 
 # Блокировка, чтобы автообновление и ручное обновление не конфликтовали
 _overlay_lock = threading.Lock()
 
+# Момент старта бота (для расчёта uptime)
+_started_at = time.monotonic()
+
+
 # ============ ЦВЕТА ============
 
 class C:
-    R = '\033[91m'     # красный
+    """Truecolor ANSI-коды. Работают в Windows Terminal / modern terminals."""
+    R = '\033[91m'     # красный (fallback 8-бит)
     G = '\033[92m'     # зелёный
     Y = '\033[93m'     # жёлтый
     B = '\033[94m'     # синий
     M = '\033[95m'     # пурпурный
     CY = '\033[96m'    # голубой
     W = '\033[97m'     # белый
-    BOLD = '\033[1m'   # жирный
-    DIM = '\033[2m'    # тусклый
-    RST = '\033[0m'    # сброс
+    BOLD = '\033[1m'
+    DIM = '\033[2m'
+    ITALIC = '\033[3m'
+    RST = '\033[0m'
 
-# ============ ASCII-КАРТИНКА ============
 
-ART_RAW = r"""              /\
-             /  \
-            /    \
-           /      \
-          /        \
-         /          \
-        /            \
-       /              \
-      /                \
-     /                  \
-    /                    \
-   /                      \
-  /                        \
- /                          \
-/____________________________\
+def _rgb(r, g, b):
+    """Truecolor 24-бит escape."""
+    return f'\033[38;2;{r};{g};{b}m'
+
+
+def _gradient_color(t):
+    """Градиент cyan (0) → magenta (1). t ∈ [0, 1]."""
+    t = max(0.0, min(1.0, t))
+    r = int( 64 + (220 -  64) * t)
+    g = int(224 + ( 80 - 224) * t)
+    b = int(240 + (200 - 240) * t)
+    return _rgb(r, g, b)
+
+
+# ============ ASCII-АРТ ============
+
+# Компактная тату-машинка (coil machine): катушка сверху → grip → игла.
+# ~16 строк, хорошо ложится рядом с инфо-колонкой.
+ART_RAW = r"""
+         _.-._
+        / o o \
+       |   ◆   |
+        \ ___ /
+       __|   |__
+      |  |   |  |
+      |  |___|  |
+       \|_|_|_|/
+        |     |
+       [=======]
+        |     |
+        |  |  |
+        |  |  |
+         \ | /
+          \|/
+           ◆
 """
-
-# Палитра раскраски строк арта. Один белый = ч/б арт (по запросу).
-ART_PALETTE = [C.W]
 
 ANSI_RE = re.compile(r'\x1b\[[0-9;]*m')
 
@@ -66,12 +97,10 @@ def _vlen(s):
 
 def _trim_art(lines):
     """Обрезает пустые строки сверху/снизу и общий левый отступ.
-    Если арт шире MAX_ART_W или выше MAX_ART_H — сжимает по X/Y в 2 раза
-    (каждый 2-й символ / каждая 2-я строка), чтобы влезть рядом с колонкой."""
-    MAX_ART_W = 42
-    MAX_ART_H = 26
+    Если арт слишком широкий/высокий — сжимает."""
+    MAX_ART_W = 36
+    MAX_ART_H = 22
 
-    # Табы → пробелы, убираем хвостовые пробелы, пустые строки сверху/снизу
     lines = [l.expandtabs(4).rstrip() for l in lines]
     while lines and not lines[0].strip():
         lines.pop(0)
@@ -81,21 +110,16 @@ def _trim_art(lines):
     if not lines:
         return []
 
-    # Левый отступ — МИНИМУМ по строкам: он всегда безопасен, ни одна
-    # строка не обрежется (у основания пирамиды отступ меньше, чем у вершины).
     indents = [len(l) - len(l.lstrip()) for l in lines if l.strip()]
     indent = min(indents) if indents else 0
     if indent:
         lines = [l[indent:] if len(l) >= indent else l for l in lines]
 
-    # Сжатие по X, если слишком широко. Единый сдвиг для всех строк
-    # сохраняет вертикальную ось арта (по самой широкой строке).
     width = max((len(l) for l in lines), default=0)
     if width > MAX_ART_W:
         shift = 1 if width % 2 else 0
         lines = [l[shift::2] if len(l) > shift else l for l in lines]
 
-    # Сжатие по Y, если слишком высоко
     if len(lines) > MAX_ART_H:
         lines = lines[::2]
 
@@ -117,41 +141,56 @@ def _get_art():
 
 
 def _colorize_art(lines):
-    """Раскрашивает строки арта градиентом (палитра повторяется)."""
+    """Раскрашивает арт truecolor-градиентом cyan→magenta (сверху вниз)."""
+    if not lines:
+        return []
+    n = len(lines)
     out = []
     for i, line in enumerate(lines):
-        color = ART_PALETTE[i % len(ART_PALETTE)]
-        out.append(color + line + C.RST)
+        t = i / max(1, n - 1)
+        out.append(_gradient_color(t) + line + C.RST)
     return out
 
 
 # ============ СБОРКА БЛОКОВ ============
 
-def _side_by_side(left_lines, right_lines, gap=6):
-    """Склеивает два многострочных блока в один: левый арт + правая колонка.
-    Учитывает ANSI-коды: отступ считается по видимой длине строки."""
+def _side_by_side(left_lines, right_lines, gap=4):
+    """Склеивает два блока. Левый арт вертикально центрирован относительно правого."""
     h = max(len(left_lines), len(right_lines))
     left_w = max((_vlen(l) for l in left_lines), default=0)
     rows = []
+
+    # Вертикальное центрирование левого блока
+    left_offset = max(0, (h - len(left_lines)) // 2)
+
     for i in range(h):
-        l = left_lines[i] if i < len(left_lines) else ''
+        li = i - left_offset
+        l = left_lines[li] if 0 <= li < len(left_lines) else ''
         r = right_lines[i] if i < len(right_lines) else ''
         if r:
             pad = max(0, left_w - _vlen(l) + gap)
             rows.append(l + ' ' * pad + r)
-        else:
+        elif l:
+            # строка только с артом (правая колонка короче)
             rows.append(l)
+        else:
+            rows.append('')
     return rows
 
 
 def _kv(label, value, color=C.CY):
-    """Строка 'label: value' в стиле neofetch (цветной ключ, белое значение)."""
-    return f"{C.BOLD}{color}{label}:{C.RST} {C.W}{value}{C.RST}"
+    """Строка 'label: value' в стиле neofetch."""
+    return f"{C.BOLD}{color}{label}{C.RST} {C.W}{value}{C.RST}"
 
 
 def _section(title):
-    """Заголовок секции в правой колонке."""
-    return f"{C.BOLD}{C.Y}{title}{C.RST}"
+    """Заголовок секции с подчёркиванием."""
+    return f"{C.BOLD}{C.M}◇ {title}{C.RST}"
+
+
+def _hr(width=44):
+    """Тонкий разделитель."""
+    return f"{C.DIM}{'─' * width}{C.RST}"
 
 
 # ============ ИНФОРМАЦИЯ ============
@@ -162,43 +201,39 @@ def _system_lines():
 
     ver = f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
     lines.append(_kv("ОС", "Windows", C.Y))
-    lines.append(_kv("Python", ver, C.Y))
+    lines.append(_kv("Py", ver, C.Y))
 
-    # Библиотеки
     try:
         import importlib.metadata
         tbot_ver = importlib.metadata.version('pytelegrambotapi')
-        lines.append(_kv("BotAPI", f"pyTelegramBotAPI v{tbot_ver}", C.Y))
+        lines.append(_kv("API", f"telebot v{tbot_ver}", C.Y))
     except Exception:
-        lines.append(_kv("BotAPI", "pyTelegramBotAPI (не определена)", C.Y))
+        lines.append(_kv("API", "telebot (?)", C.Y))
 
-    # Токен и админ
     from config import BOT_TOKEN, ADMIN_IDS
     if BOT_TOKEN and BOT_TOKEN != 'YOUR_TELEGRAM_BOT_TOKEN_HERE':
-        lines.append(_kv("Токен", f"✓ установлен ({BOT_TOKEN[:8]}...)", C.G))
+        lines.append(_kv("Токен", f"✓ {BOT_TOKEN[:6]}…", C.G))
     else:
-        lines.append(_kv("Токен", f"✗ НЕ установлен!", C.R))
+        lines.append(_kv("Токен", "✗ нет!", C.R))
 
     if ADMIN_IDS:
-        label = "Админ" if len(ADMIN_IDS) == 1 else "Админы"
         ids = ", ".join(str(i) for i in ADMIN_IDS)
-        lines.append(_kv(label, f"✓ ID {ids}", C.G))
+        label = "Админ" if len(ADMIN_IDS) == 1 else "Админы"
+        lines.append(_kv(label, f"✓ {ids}", C.G))
     else:
-        lines.append(_kv("Админ", "не указан", C.Y))
+        lines.append(_kv("Админ", "—", C.Y))
 
-    # База данных
-    db_path = 'tattoo_bot.db'
-    if os.path.exists(db_path):
-        size = os.path.getsize(db_path)
-        lines.append(_kv("БД", f"✓ tattoo_bot.db ({size // 1024} КБ)", C.G))
+    if os.path.exists(DB_PATH):
+        size = os.path.getsize(DB_PATH)
+        size_str = f"{size // 1024} КБ" if size < 1024 * 1024 else f"{size / 1024 / 1024:.1f} МБ"
+        lines.append(_kv("БД", f"✓ {DB_PATH} ({size_str})", C.G))
     else:
         lines.append(_kv("БД", "будет создана", C.Y))
 
-    # Файл .env
     if os.path.exists('.env'):
-        lines.append(_kv(".env", "✓ найден", C.G))
+        lines.append(_kv(".env", "✓", C.G))
     else:
-        lines.append(_kv(".env", "✗ НЕ найден!", C.R))
+        lines.append(_kv(".env", "✗ нет!", C.R))
 
     return lines
 
@@ -211,14 +246,13 @@ def _stats_lines(bookings):
     avg, cnt = get_rating_stats()
 
     active = [b for b in bookings if b['status'] in ('pending', 'confirmed')]
-    rating = f"{avg:.1f}/5" if cnt else "—"
+    rating = f"{avg:.1f} ⭐ ({cnt})" if cnt else "—"
 
     return [
-        _kv("💰 Услуги", len(services), C.Y),
-        _kv("🎨 Работ", len(portfolio), C.M),
-        _kv("⭐ Отзывы", f"{cnt}  (рейтинг {rating})", C.Y),
-        _kv("📅 Всего записей", len(bookings), C.B),
-        _kv("🔔 Активных", len(active), C.G),
+        _kv("Услуги", len(services), C.Y),
+        _kv("Работы", len(portfolio), C.M),
+        _kv("Отзывы", rating, C.Y),
+        _kv("Записи", f"{len(bookings)} ({len(active)} акт.)", C.B),
     ]
 
 
@@ -237,72 +271,107 @@ def _upcoming_lines(bookings):
             upcoming.append((dt, b))
 
     if not upcoming:
-        return [f"{C.DIM}  Нет предстоящих записей{C.RST}"]
+        return [f"{C.DIM}  нет записей{C.RST}"]
 
     upcoming.sort(key=lambda x: x[0])
     lines = []
     for dt, b in upcoming[:4]:
         name = b['first_name'] or 'Клиент'
-        uname = f"@{b['username']}" if b['username'] else ""
-        when = dt.strftime('%d.%m %H:%M')
+        uname = f" @{b['username']}" if b['username'] else ""
         if dt.date() == now.date():
-            when = f"{C.R}{C.BOLD}СЕГОДНЯ {dt.strftime('%H:%M')}{C.RST}"
+            when = f"{C.R}{C.BOLD}сегодня {dt.strftime('%H:%M')}{C.RST}"
         elif (dt.date() - now.date()).days == 1:
             when = f"{C.Y}завтра {dt.strftime('%H:%M')}{C.RST}"
-        service = (b['service'] or '')[:18]
-        lines.append(f"  {C.BOLD}• #{b['id']}{C.RST} {when} — {name} {C.DIM}{uname}{C.RST}")
-        lines.append(f"      {C.DIM}{service}{C.RST}")
+        else:
+            when = dt.strftime('%d.%m %H:%M')
+        service = (b['service'] or '')[:20]
+        lines.append(f"  {C.BOLD}#{b['id']}{C.RST} {when} {name}{C.DIM}{uname}{C.RST}")
+        lines.append(f"     {C.DIM}{service}{C.RST}")
     return lines
+
+
+def _uptime():
+    """Строка аптайма бота."""
+    secs = int(time.monotonic() - _started_at)
+    if secs < 60:
+        return f"{secs}с"
+    if secs < 3600:
+        return f"{secs // 60}м {secs % 60}с"
+    h, m = secs // 3600, (secs % 3600) // 60
+    return f"{h}ч {m}м"
 
 
 # ============ ПОЛНАЯ КОЛОНКА ============
 
 def build_info_lines():
-    """Собирает всю правую колонку neofetch-стиля."""
+    """Собирает всю правую колонку."""
     lines = []
-    bookings = get_all_bookings()  # один запрос для статистики и ближайших записей
+    bookings = get_all_bookings()
 
-    # Шапка как user@host
-    lines.append(f"{C.BOLD}{C.G}Максим Андреевич{C.RST} {C.W}@{C.RST} {C.BOLD}{C.CY}tatoo_asbest_best_bot{C.RST}")
-    lines.append(f"{C.DIM}{'─' * 40}{C.RST}")
+    # Шапка: БОТ @ handle + город
+    lines.append(f"{C.BOLD}{C.CY}{BOT_NAME}{C.RST}"
+                 f" {C.DIM}·{C.RST} "
+                 f"{C.W}{BOT_MASTER}{C.RST}")
+    lines.append(f"{C.DIM}@{BOT_HANDLE}{C.RST}")
+    lines.append(_hr())
+    lines.append(f"{C.DIM}📍 {BOT_CITY}{C.RST}")
 
+    lines.append("")
+    lines.append(_section("СИСТЕМА"))
     lines.extend(_system_lines())
+
     lines.append("")
     lines.append(_section("СТАТИСТИКА"))
     lines.extend(_stats_lines(bookings))
+
     lines.append("")
-    lines.append(_section("БЛИЖАЙШИЕ ЗАПИСИ"))
+    lines.append(_section("ЗАПИСИ"))
     lines.extend(_upcoming_lines(bookings))
+
     lines.append("")
-    lines.append(_kv("Статус", "✅ БОТ ЗАПУЩЕН", C.G))
+    lines.append(_hr())
+    lines.append(f"{C.DIM}↻ {datetime.now().strftime('%H:%M:%S')}"
+                 f"  ⏱ аптайм {_uptime()}{C.RST}")
 
     return lines
 
 
 def _render():
-    """Полный рендер: арт слева + инфо справа."""
+    """Полный рендер: арт слева (центрирован) + инфо справа."""
     art = _colorize_art(_get_art())
     info = build_info_lines()
     block = _side_by_side(art, info)
     print('\n'.join(block))
-    print(f"\n{C.DIM}Окно не закрывайте! Ctrl+C — остановка.{C.RST}")
+    print(f"\n{C.DIM}Ctrl+C — остановка. Окно не закрывайте.{C.RST}")
     print()
+
+
+# ============ UTF-8 БЕЗОПАСНОСТЬ ============
+
+def _ensure_utf8_stdout():
+    """Переключает stdout/stderr на UTF-8.
+    Без этого эмодзи/ Unicode падают с UnicodeEncodeError на cp1251/cp866 консолях."""
+    try:
+        if hasattr(sys.stdout, 'reconfigure'):
+            sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+            sys.stderr.reconfigure(encoding='utf-8', errors='replace')
+    except (ValueError, io.UnsupportedOperation):
+        pass  # уже reconfigure'd или не поддерживается
 
 
 # ============ ПУБЛИЧНЫЙ API ============
 
 def show_overlay():
     """Полный оверлей запуска (неочищающий первый рендер)."""
-    # Инициализация ANSI-цветов для Windows
     if os.name == 'nt':
-        os.system('')
+        os.system('')  # активируем обработку ANSI-кодов
+    _ensure_utf8_stdout()
     with _overlay_lock:
         _render()
 
 
 def refresh_overlay():
-    """Перерисовка оверлея после действий (новая запись, добавление работы и т.д.).
-    Очищает экран и рисует заново. Потокобезопасно."""
+    """Перерисовка оверлея после действий. Очищает экран, потокобезопасно."""
     with _overlay_lock:
         if os.name == 'nt':
             os.system('cls')
@@ -311,14 +380,13 @@ def refresh_overlay():
         _render()
 
 
-# Для обратной совместимости (если что-то вызывало старые функции)
+# Обратная совместимость
 def show_banner():
     _render()
 
 
 def show_stats():
-    info = build_info_lines()
-    print('\n'.join(_side_by_side(_colorize_art(_get_art()), info)))
+    _render()
 
 
 def check_system():
