@@ -98,7 +98,7 @@ def _vlen(s):
 def _trim_art(lines):
     """Обрезает пустые строки сверху/снизу и общий левый отступ.
     Если арт слишком широкий/высокий — сжимает."""
-    MAX_ART_W = 36
+    MAX_ART_W = 52
     MAX_ART_H = 22
 
     lines = [l.expandtabs(4).rstrip() for l in lines]
