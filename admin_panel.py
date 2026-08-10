@@ -119,25 +119,26 @@ def apply_retro_style(root):
                     borderwidth=1,
                     relief='solid',
                     rowheight=26)
-    # Заголовки таблиц — фиолетовые
+    # Заголовки таблиц — серый фон, оранжевый текст (читаемо)
     style.configure('Treeview.Heading',
-                    background=Palette.ORANGE_DIM,
+                    background=Palette.GRAY,
                     foreground=Palette.ORANGE,
                     font=('Consolas', 10, 'bold'),
                     relief='flat',
                     padding=6)
     style.map('Treeview.Heading',
-              background=[('active', Palette.ORANGE)])
+              background=[('active', '#aaaaaa')])
+    # Выделенная строка — серый фон, оранжевый текст остаётся читаемым
     style.map('Treeview',
-              background=[('selected', Palette.ORANGE_DIM)],
+              background=[('selected', Palette.GRAY)],
               foreground=[('selected', Palette.ORANGE)])
     style.configure('Vertical.TScrollbar',
-                    background=Palette.ORANGE_DIM,
+                    background=Palette.GRAY,
                     troughcolor=Palette.BG_PANEL,
                     arrowcolor=Palette.ORANGE,
                     borderwidth=0)
 
-    # Notebook (вкладки) — фиолетовый текст
+    # Notebook (вкладки) — оранжевый текст, серая активная
     style.configure('TNotebook',
                     background=Palette.BG,
                     borderwidth=0)
@@ -147,7 +148,7 @@ def apply_retro_style(root):
                     padding=(16, 8),
                     font=('Consolas', 10, 'bold'))
     style.map('TNotebook.Tab',
-              background=[('selected', Palette.ORANGE_DIM)],
+              background=[('selected', Palette.GRAY)],
               foreground=[('selected', Palette.ORANGE)])
 
     # LabelFrame — фиолетовые лейблы
