@@ -246,9 +246,15 @@ def update_booking_status(booking_id, status):
     invalidate_cache('get_all_bookings', 'get_user_bookings')
 
 def delete_booking(booking_id):
-    """Полностью удаляет запись из БД."""
+    """Полностью удаляет запись из БД.
+    После удаления прижимает счётчик AUTOINCREMENT к MAX(id),
+    чтобы следующая запись получила следующий по порядку номер
+    (без 'дыр' вроде #7 при пустой таблице)."""
     conn = get_db()
     conn.execute('DELETE FROM bookings WHERE id = ?', (booking_id,))
+    # Прижимаем sqlite_sequence к реальному максимуму
+    max_id = conn.execute('SELECT COALESCE(MAX(id), 0) FROM bookings').fetchone()[0]
+    conn.execute("UPDATE sqlite_sequence SET seq = ? WHERE name = 'bookings'", (max_id,))
     conn.commit()
     conn.close()
     invalidate_cache('get_all_bookings', 'get_user_bookings')

@@ -165,6 +165,25 @@ def test_delete_booking(tmp_db):
     assert database.get_booking_by_id(bid) is None
 
 
+def test_delete_booking_keeps_dense_numbering(tmp_db):
+    """После удаления записи следующая должна получить ближайший свободный ID,
+    а не 'прыгнуть' через удалённый (AUTOINCREMENT прижимается к MAX(id))."""
+    database.save_user(303, "zoe", "Zoe", None)
+    b1 = database.create_booking(303, "Услуга", "d", "01.09.2026 10:00")
+    b2 = database.create_booking(303, "Услуга", "d", "02.09.2026 11:00")
+
+    # Удаляем последнюю (b2) — счётчик должен прижаться к b1
+    database.delete_booking(b2)
+    next_id = database.create_booking(303, "Услуга", "d", "03.09.2026 12:00")
+    assert next_id == b2, f"Ожидался ID {b2}, получен {next_id}"
+
+    # Удаляем все — следующая должна стать #1
+    database.delete_booking(b1)
+    database.delete_booking(next_id)
+    first_id = database.create_booking(303, "Услуга", "d", "04.09.2026 13:00")
+    assert first_id == 1, f"Ожидался ID 1, получен {first_id}"
+
+
 def test_get_all_bookings(tmp_db):
     database.save_user(310, "frank", "Frank", None)
     database.save_user(311, "grace", "Grace", None)
