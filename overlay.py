@@ -17,6 +17,7 @@ API не менялся: show_overlay() при старте, refresh_overlay() �
 import io
 import os
 import re
+import shutil
 import sys
 import threading
 import time
@@ -97,10 +98,7 @@ def _vlen(s):
 
 def _trim_art(lines):
     """Обрезает пустые строки сверху/снизу и общий левый отступ.
-    Если арт слишком широкий/высокий — сжимает."""
-    MAX_ART_W = 52
-    MAX_ART_H = 22
-
+    Компрессию не делает — она применяется отдельно через _compress_art_to."""
     lines = [l.expandtabs(4).rstrip() for l in lines]
     while lines and not lines[0].strip():
         lines.pop(0)
@@ -115,19 +113,46 @@ def _trim_art(lines):
     if indent:
         lines = [l[indent:] if len(l) >= indent else l for l in lines]
 
-    width = max((len(l) for l in lines), default=0)
-    if width > MAX_ART_W:
-        shift = 1 if width % 2 else 0
-        lines = [l[shift::2] if len(l) > shift else l for l in lines]
-
-    if len(lines) > MAX_ART_H:
-        lines = lines[::2]
-
     return lines
 
 
+# Целевая ширина арта по умолчанию. Натуральная ширина треугольника ~41 символ,
+# 22 даёт ~50% уменьшение после одной X-компрессии (halving).
+ART_TARGET_WIDTH = 22
+# Минимальная ширина, при которой арт показывается. Ниже — только инфо-колонка.
+ART_MIN_WIDTH = 14
+
+
+def _compress_art_to(lines, target_w):
+    """Сжимает арт по X (каждый 2-й символ), пока ширина ≤ target_w.
+    Сохраняет вертикальную ось: единый сдвиг для всех строк."""
+    if not lines:
+        return lines
+    while lines:
+        width = max(len(l) for l in lines)
+        if width <= target_w:
+            break
+        shift = 1 if width % 2 else 0
+        new_lines = [l[shift::2] if len(l) > shift else l for l in lines]
+        # защита от отсутствия прогресса
+        if max((len(l) for l in new_lines), default=0) >= width:
+            break
+        lines = new_lines
+    return lines
+
+
+def _term_width(default=80):
+    """Текущая ширина терминала."""
+    try:
+        return shutil.get_terminal_size((default, 24)).columns
+    except Exception:
+        return default
+
+
 def _get_art():
-    """Возвращает список строк арта. Приоритет: ascii-art.txt → art.txt → ART_RAW."""
+    """Возвращает строки арта (только обрезанные, без компрессии).
+    Приоритет: ascii-art.txt → art.txt → ART_RAW.
+    Компрессия применяется в _render под текущую ширину терминала."""
     for name in ('ascii-art.txt', 'art.txt'):
         if os.path.exists(name):
             try:
@@ -337,10 +362,24 @@ def build_info_lines():
 
 
 def _render():
-    """Полный рендер: арт слева (центрирован) + инфо справа."""
-    art = _colorize_art(_get_art())
+    """Полный рендер с автокалибровкой под ширину терминала."""
     info = build_info_lines()
-    block = _side_by_side(art, info)
+    gap = 4
+    term_w = _term_width()
+    info_w = max((_vlen(l) for l in info), default=0)
+    avail_for_art = term_w - info_w - gap
+
+    art_raw = _get_art()
+
+    if avail_for_art < ART_MIN_WIDTH:
+        # Терминал слишком узкий: арт не помещается — только инфо-колонка
+        block = info
+    else:
+        target = min(ART_TARGET_WIDTH, avail_for_art)
+        art_compressed = _compress_art_to(art_raw, target)
+        art = _colorize_art(art_compressed)
+        block = _side_by_side(art, info, gap=gap)
+
     print('\n'.join(block))
     print(f"\n{C.DIM}Ctrl+C — остановка. Окно не закрывайте.{C.RST}")
     print()
