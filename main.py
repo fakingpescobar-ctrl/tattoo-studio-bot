@@ -15,7 +15,7 @@ from config import BOT_TOKEN, ADMIN_ID
 from collections import defaultdict
 from database import *
 from keyboards import *
-from admin_panel import run_admin_panel
+from admin_panel import run_admin_panel, set_tg_active
 from logging.handlers import RotatingFileHandler
 
 # Настройка логирования — только в файл (консоль зарезервирована под оверлей)
@@ -75,6 +75,7 @@ if __name__ == "__main__":
         import tkinter  # noqa: F401
         gui_thread = threading.Thread(target=run_admin_panel, daemon=True)
         gui_thread.start()
+        set_tg_active(True)
         logger.info("Admin panel (tkinter) started in background thread")
     except ImportError:
         logger.warning("tkinter unavailable — falling back to console overlay")

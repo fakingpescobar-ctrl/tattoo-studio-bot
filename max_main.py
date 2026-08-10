@@ -54,6 +54,12 @@ def main():
         me = client.get_me()
         logger.info(f"Connected as: {me.get('name') or me.get('username') or '?'} (id={me.get('user_id')})")
         print(f"[OK] MAX-бот подключён: {me.get('name') or me.get('username') or '?'}")
+        # Сообщаем админ-панели что MAX-бот активен
+        try:
+            from admin_panel import set_max_active
+            set_max_active(True)
+        except Exception:
+            pass  # панель может быть не запущена
     except MaxApiError as e:
         logger.error(f"Auth check failed: {e}")
         print(f"[ERROR] Не удалось подключиться к MAX API: {e}")

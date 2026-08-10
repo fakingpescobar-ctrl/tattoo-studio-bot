@@ -23,9 +23,26 @@ from database import (delete_booking, delete_portfolio_work, get_all_bookings,
 # Момент старта — для аптайма в шапке
 _started_at = time.monotonic()
 
+# Флаги активности ботов. Поднимаются из main.py / max_main.py при запуске.
+# В standalone режиме (python admin_panel.py) определяются по наличию токенов в config.
+tg_active = False
+max_active = False
+
 # Потокобезопасный канал уведомлений
 _notify_queue: list = []
 _notify_lock = threading.Lock()
+
+
+def set_tg_active(value=True):
+    """Вызывается из main.py при старте Telegram-бота."""
+    global tg_active
+    tg_active = value
+
+
+def set_max_active(value=True):
+    """Вызывается из max_main.py при старте MAX-бота."""
+    global max_active
+    max_active = value
 
 
 def panel_notify(text):
@@ -37,27 +54,26 @@ def panel_notify(text):
 # ============ РЕТРО ПАЛИТРА ============
 
 class Palette:
-    """Чёрно-жёлто-фиолетовая ретро-палитра."""
-    BG         = '#0d0d1a'  # глубокий чёрный с синим отливом
-    BG_PANEL   = '#1a1a2e'  # фон панелей
-    BG_CARD    = '#16213e'  # фон карточек
-    BG_INPUT   = '#0f0f23'  # фон полей ввода
-    YELLOW     = '#ffd60a'  # основной жёлтый (акцент)
-    YELLOW_DIM = '#c9a227'  # тёмный жёлтый
+    """Чёрно-оранжево-фиолетовая ретро-палитра."""
+    BG         = '#000000'  # чистый чёрный
+    BG_PANEL   = '#0a0a0a'  # фон панелей (почти чёрный)
+    BG_CARD    = '#121212'  # фон карточек
+    BG_INPUT   = '#080808'  # фон полей ввода
+    ORANGE     = '#ff8c42'  # основной оранжевый (все цифры/буквы статистики)
+    YELLOW     = '#ffd60a'  # акцент (кнопки, статусы)
     PURPLE     = '#9d4edd'  # основной фиолетовый
     PURPLE_DIM = '#5a189a'  # тёмный фиолетовый
     TEXT       = '#e0e0e0'  # основной текст
-    TEXT_DIM   = '#8888aa'  # приглушённый текст
-    RED        = '#ff4757'
-    GREEN      = '#2ed573'
-    ORANGE     = '#ff8c42'
+    TEXT_DIM   = '#707080'  # приглушённый текст
+    RED        = '#ff4757'  # бот НЕ активен
+    GREEN      = '#2ed573'  # бот активен
     # Статусы записей (цветные badge-фоны)
     STATUS_BG = {
-        'pending':          '#3d3d1f',  # тёмно-жёлтый
-        'confirmed':        '#1f3d2a',  # тёмно-зелёный
-        'completed':        '#1f2d3d',  # тёмно-голубой
-        'cancelled':        '#3d1f1f',  # тёмно-красный
-        'client_cancelled': '#2d1f3d',  # тёмно-фиолетовый
+        'pending':          '#2a2218',  # тёмно-оранжевый
+        'confirmed':        '#1a2a1f',  # тёмно-зелёный
+        'completed':        '#1a242a',  # тёмно-голубой
+        'cancelled':        '#2a1818',  # тёмно-красный
+        'client_cancelled': '#1f182a',  # тёмно-фиолетовый
     }
     STATUS_FG = {
         'pending':          '#ffd60a',  # жёлтый
@@ -95,17 +111,18 @@ def apply_retro_style(root):
     except Exception:
         pass
 
-    # Treeview
+    # Treeview — таблицы (текст оранжевый, фон чёрный)
     style.configure('Treeview',
                     background=Palette.BG_CARD,
-                    foreground=Palette.TEXT,
+                    foreground=Palette.ORANGE,
                     fieldbackground=Palette.BG_CARD,
                     borderwidth=1,
                     relief='solid',
                     rowheight=26)
+    # Заголовки таблиц — фиолетовые
     style.configure('Treeview.Heading',
                     background=Palette.PURPLE_DIM,
-                    foreground=Palette.YELLOW,
+                    foreground=Palette.PURPLE,
                     font=('Consolas', 10, 'bold'),
                     relief='flat',
                     padding=6)
@@ -113,47 +130,47 @@ def apply_retro_style(root):
               background=[('active', Palette.PURPLE)])
     style.map('Treeview',
               background=[('selected', Palette.PURPLE_DIM)],
-              foreground=[('selected', Palette.YELLOW)])
+              foreground=[('selected', Palette.ORANGE)])
     style.configure('Vertical.TScrollbar',
                     background=Palette.PURPLE_DIM,
                     troughcolor=Palette.BG_PANEL,
-                    arrowcolor=Palette.YELLOW,
+                    arrowcolor=Palette.PURPLE,
                     borderwidth=0)
 
-    # Notebook (вкладки)
+    # Notebook (вкладки) — фиолетовый текст
     style.configure('TNotebook',
                     background=Palette.BG,
                     borderwidth=0)
     style.configure('TNotebook.Tab',
                     background=Palette.BG_PANEL,
-                    foreground=Palette.TEXT_DIM,
+                    foreground=Palette.PURPLE,
                     padding=(16, 8),
                     font=('Consolas', 10, 'bold'))
     style.map('TNotebook.Tab',
               background=[('selected', Palette.PURPLE_DIM)],
-              foreground=[('selected', Palette.YELLOW)])
+              foreground=[('selected', Palette.PURPLE)])
 
-    # LabelFrame
+    # LabelFrame — фиолетовые лейблы
     style.configure('TLabelframe',
                     background=Palette.BG_PANEL,
-                    foreground=Palette.YELLOW,
+                    foreground=Palette.PURPLE,
                     borderwidth=1,
                     relief='solid')
     style.configure('TLabelframe.Label',
                     background=Palette.BG_PANEL,
-                    foreground=Palette.YELLOW,
+                    foreground=Palette.PURPLE,
                     font=('Consolas', 9, 'bold'))
 
     # Combobox
     style.configure('TCombobox',
                     background=Palette.BG_INPUT,
-                    foreground=Palette.YELLOW,
+                    foreground=Palette.ORANGE,
                     fieldbackground=Palette.BG_INPUT,
-                    arrowcolor=Palette.YELLOW,
+                    arrowcolor=Palette.PURPLE,
                     borderwidth=1)
     style.map('TCombobox',
               fieldbackground=[('readonly', Palette.BG_INPUT)],
-              foreground=[('readonly', Palette.YELLOW)])
+              foreground=[('readonly', Palette.ORANGE)])
 
 
 # ============ РЕТРО КНОПКА (tk) ============
@@ -172,8 +189,8 @@ class RetroButton(tk.Frame):
             font=('Consolas', 9, 'bold'),
             padx=12, pady=6, cursor='hand2',
             highlightthickness=1,
-            highlightbackground=Palette.YELLOW_DIM,
-            highlightcolor=Palette.YELLOW,
+            highlightbackground=Palette.PURPLE_DIM,
+            highlightcolor=Palette.PURPLE,
         )
         self.label.pack(fill='both', expand=True)
         self.label.bind('<Button-1>', self._click)
@@ -196,20 +213,20 @@ class RetroButton(tk.Frame):
 # ============ РЕТРО КАРТОЧКА ============
 
 class RetroCard(tk.Frame):
-    """Карточка статистики в ретро-стиле."""
+    """Карточка статистики: оранжевые цифры на чёрном фоне."""
 
-    def __init__(self, parent, label, accent=Palette.YELLOW):
+    def __init__(self, parent, label, accent=Palette.ORANGE):
         super().__init__(parent, bg=Palette.BG_CARD,
                          highlightthickness=2,
-                         highlightbackground=accent,
-                         highlightcolor=accent,
+                         highlightbackground=Palette.PURPLE,
+                         highlightcolor=Palette.PURPLE,
                          bd=0)
         tk.Label(self, text=label, bg=Palette.BG_CARD,
-                 fg=Palette.TEXT_DIM,
+                 fg=Palette.PURPLE,
                  font=('Consolas', 9, 'bold')).pack(pady=(8, 0))
         self.value_var = tk.StringVar(value="—")
         tk.Label(self, textvariable=self.value_var,
-                 bg=Palette.BG_CARD, fg=accent,
+                 bg=Palette.BG_CARD, fg=Palette.ORANGE,
                  font=('Consolas', 24, 'bold')).pack(pady=(0, 8))
 
 
@@ -239,30 +256,62 @@ class AdminPanel(tk.Tk):
     # ---------- ШАПКА ----------
 
     def _build_header(self):
-        header = tk.Frame(self, bg=Palette.BG_PANEL, height=56)
+        header = tk.Frame(self, bg=Palette.BG_PANEL, height=72)
         header.pack(fill='x')
         header.pack_propagate(False)
 
+        # Левая часть: название (фиолетовым)
         left = tk.Frame(header, bg=Palette.BG_PANEL)
         left.pack(side='left', padx=14)
 
-        # Жёлтое имя — крупно, моноширинно
-        tk.Label(left, text=f"▰ {BOT_NAME} ▰",
-                 bg=Palette.BG_PANEL, fg=Palette.YELLOW,
-                 font=('Consolas', 18, 'bold')).pack(side='left')
-        tk.Label(left, text=f"  {BOT_MASTER}  ◇  @{BOT_HANDLE}",
+        tk.Label(left, text="▰ ПРИЗМА ТАТУ СТУДИО ▰",
                  bg=Palette.BG_PANEL, fg=Palette.PURPLE,
-                 font=('Consolas', 10)).pack(side='left', padx=8, pady=(4, 0))
+                 font=('Consolas', 16, 'bold')).pack(anchor='w')
+        tk.Label(left, text="МАКСИМ АНДРЕЕВИЧ  ◇  @tatoo_asbest_best_bot",
+                 bg=Palette.BG_PANEL, fg=Palette.PURPLE,
+                 font=('Consolas', 9)).pack(anchor='w', pady=(0, 0))
+
+        # Правая часть: индикаторы ботов + аптайм
+        right = tk.Frame(header, bg=Palette.BG_PANEL)
+        right.pack(side='right', padx=14)
+
+        # Индикаторы статуса ботов
+        bots_frame = tk.Frame(right, bg=Palette.BG_PANEL)
+        bots_frame.pack(anchor='e')
+
+        self.tg_dot_var = tk.StringVar(value="●")
+        self.tg_text_var = tk.StringVar(value="Telegram")
+        tg_frame = tk.Frame(bots_frame, bg=Palette.BG_PANEL)
+        tg_frame.pack(side='left', padx=(0, 12))
+        self.tg_dot_label = tk.Label(tg_frame, textvariable=self.tg_dot_var,
+                 bg=Palette.BG_PANEL, fg=Palette.RED,
+                 font=('Consolas', 12, 'bold'))
+        self.tg_dot_label.pack(side='left')
+        tk.Label(tg_frame, textvariable=self.tg_text_var,
+                 bg=Palette.BG_PANEL, fg=Palette.TEXT_DIM,
+                 font=('Consolas', 9)).pack(side='left', padx=3)
+
+        self.max_dot_var = tk.StringVar(value="●")
+        self.max_text_var = tk.StringVar(value="MAX")
+        max_frame = tk.Frame(bots_frame, bg=Palette.BG_PANEL)
+        max_frame.pack(side='left')
+        self.max_dot_label = tk.Label(max_frame, textvariable=self.max_dot_var,
+                 bg=Palette.BG_PANEL, fg=Palette.RED,
+                 font=('Consolas', 12, 'bold'))
+        self.max_dot_label.pack(side='left')
+        tk.Label(max_frame, textvariable=self.max_text_var,
+                 bg=Palette.BG_PANEL, fg=Palette.TEXT_DIM,
+                 font=('Consolas', 9)).pack(side='left', padx=3)
 
         self.uptime_var = tk.StringVar(value="⏱ 0с")
-        tk.Label(header, textvariable=self.uptime_var,
-                 bg=Palette.BG_PANEL, fg=Palette.TEXT_DIM,
-                 font=('Consolas', 9)).pack(side='right', padx=14)
+        tk.Label(right, textvariable=self.uptime_var,
+                 bg=Palette.BG_PANEL, fg=Palette.ORANGE,
+                 font=('Consolas', 9)).pack(anchor='e', pady=(4, 0))
 
-        # Тонкая жёлто-фиолетовая полоса-разделитель
-        sep = tk.Frame(self, bg=Palette.YELLOW, height=2)
+        # Тонкая фиолетово-оранжевая полоса-разделитель
+        sep = tk.Frame(self, bg=Palette.PURPLE, height=2)
         sep.pack(fill='x')
-        sep2 = tk.Frame(self, bg=Palette.PURPLE, height=1)
+        sep2 = tk.Frame(self, bg=Palette.ORANGE, height=1)
         sep2.pack(fill='x')
 
     # ---------- ВКЛАДКИ ----------
@@ -343,7 +392,7 @@ class AdminPanel(tk.Tk):
         filt = tk.Frame(parent, bg=Palette.BG)
         filt.pack(fill='x', padx=12, pady=(10, 6))
 
-        tk.Label(filt, text="ФИЛЬТР:", bg=Palette.BG, fg=Palette.YELLOW,
+        tk.Label(filt, text="ФИЛЬТР:", bg=Palette.BG, fg=Palette.PURPLE,
                  font=('Consolas', 9, 'bold')).pack(side='left')
 
         self.status_var = tk.StringVar(value='all')
@@ -353,12 +402,12 @@ class AdminPanel(tk.Tk):
         cb.pack(side='left', padx=8)
         cb.bind('<<ComboboxSelected>>', lambda e: self._load_bookings())
 
-        tk.Label(filt, text="  ПОИСК:", bg=Palette.BG, fg=Palette.YELLOW,
+        tk.Label(filt, text="  ПОИСК:", bg=Palette.BG, fg=Palette.PURPLE,
                  font=('Consolas', 9, 'bold')).pack(side='left')
         self.search_var = tk.StringVar()
         entry = tk.Entry(filt, textvariable=self.search_var, width=22,
-                         bg=Palette.BG_INPUT, fg=Palette.YELLOW,
-                         insertbackground=Palette.YELLOW,
+                         bg=Palette.BG_INPUT, fg=Palette.ORANGE,
+                         insertbackground=Palette.ORANGE,
                          font=('Consolas', 9), relief='solid',
                          bd=1, highlightthickness=1,
                          highlightbackground=Palette.PURPLE_DIM)
@@ -461,7 +510,7 @@ class AdminPanel(tk.Tk):
 
         self.status_var = tk.StringVar(value="● READY")
         tk.Label(bar, textvariable=self.status_var,
-                 bg=Palette.BG_PANEL, fg=Palette.YELLOW,
+                 bg=Palette.BG_PANEL, fg=Palette.ORANGE,
                  font=('Consolas', 9)).pack(side='left', padx=10)
 
         self.refresh_var = tk.StringVar(value="")
@@ -482,6 +531,7 @@ class AdminPanel(tk.Tk):
         now_str = datetime.now().strftime('%H:%M:%S')
         self.refresh_var.set(f"↻ {now_str}")
 
+        # Аптайм
         secs = int(time.monotonic() - _started_at)
         if secs < 60:
             up = f"{secs}с"
@@ -491,6 +541,22 @@ class AdminPanel(tk.Tk):
             h, m = secs // 3600, (secs % 3600) // 60
             up = f"{h}ч {m}м"
         self.uptime_var.set(f"⏱ {up}  ·  📍 {BOT_CITY}")
+
+        # Индикаторы ботов: TG зелёный если активен, MAX — зелёный если активен
+        # В standalone режиме (python admin_panel.py) берём из токенов config
+        tg_ok = tg_active
+        max_ok = max_active
+        if not tg_ok and not max_ok:
+            # standalone: определяем по токенам
+            try:
+                from config import BOT_TOKEN, MAX_TOKEN
+                tg_ok = bool(BOT_TOKEN and BOT_TOKEN != 'YOUR_TELEGRAM_BOT_TOKEN_HERE')
+                max_ok = bool(MAX_TOKEN)
+            except Exception:
+                pass
+
+        self.tg_dot_label.config(fg=Palette.GREEN if tg_ok else Palette.RED)
+        self.max_dot_label.config(fg=Palette.GREEN if max_ok else Palette.RED)
 
         self._load_stats()
         self._load_bookings()
