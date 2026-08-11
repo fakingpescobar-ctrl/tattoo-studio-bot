@@ -238,8 +238,6 @@ class PrizmaTUI(App):
         with Vertical():
             for line in self._logo_text:
                 yield Label(line, classes='logo')
-            yield Label(f'{BOT_MASTER}  ◇  @{BOT_HANDLE}',
-                        classes='subtitle')
 
             # Строка метрик рядом с вкладками
             with Horizontal(classes='metrics-row'):
