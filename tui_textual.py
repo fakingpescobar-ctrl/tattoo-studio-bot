@@ -84,15 +84,10 @@ class PrizmaTUI(App):
         padding: 1;
     }
     TabbedContent ContentTabs {
-        background: #0a0a0a;
+        display: none;
     }
     TabbedContent ContentTabs Tab {
-        color: #ff8c42;
-        background: #0a0a0a;
-    }
-    TabbedContent ContentTabs Tab.-active {
-        color: #ff8c42;
-        background: #222222;
+        display: none;
     }
     DataTable {
         background: #121212;
@@ -113,11 +108,11 @@ class PrizmaTUI(App):
     """
 
     BINDINGS = [
-        Binding('q', 'quit', 'Выход'),
         Binding('1', 'switch_tab("home")', 'Главная'),
         Binding('2', 'switch_tab("bookings")', 'Записи'),
         Binding('3', 'switch_tab("portfolio")', 'Портфолио'),
         Binding('r', 'refresh', 'Обновить'),
+        Binding('q', 'quit', 'Выход'),
     ]
 
     uptime = reactive('0с')
