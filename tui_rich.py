@@ -80,19 +80,19 @@ def _bot_status():
 def build_header():
     """Шапка с логотипом + индикаторы."""
     layout = Table.grid(padding=(0, 2))
-    layout.add_column(justify='left', style='purple')
+    layout.add_column(justify='left', style='#9d4edd')
     layout.add_column(justify='right')
 
-    logo_text = Text(LOGO, style='purple bold')
-    subtitle = Text(f"{BOT_MASTER}  ◇  @{BOT_HANDLE}", style='purple')
+    logo_text = Text(LOGO, style='#9d4edd bold')
+    subtitle = Text(f"{BOT_MASTER}  ◇  @{BOT_HANDLE}", style='#9d4edd')
 
     uptime_text = Text(f"⏱ {_uptime()}  ◇  📍 {BOT_CITY}\n{_bot_status()}",
-                       style='orange')
+                       style='#ff8c42')
 
     layout.add_row(logo_text, uptime_text)
     layout.add_row(subtitle, Text(f"↻ {datetime.now().strftime('%H:%M:%S')}",
-                                   style='gray'))
-    return Panel(layout, style='gray', border_style='gray', padding=(0, 1))
+                                   style='#888888'))
+    return Panel(layout, style='#888888', border_style='#888888', padding=(0, 1))
 
 
 def build_stats():
@@ -122,19 +122,19 @@ def build_stats():
         row = []
         for label, val in cards[i:i+3]:
             cell = Table.grid(padding=(0, 0))
-            cell.add_row(Text(label, style='orange bold', justify='center'))
-            cell.add_row(Text(val, style='purple bold', justify='center'))
-            row.append(Panel(cell, style='gray', border_style='gray'))
+            cell.add_row(Text(label, style='#ff8c42 bold', justify='center'))
+            cell.add_row(Text(val, style='#9d4edd bold', justify='center'))
+            row.append(Panel(cell, style='#888888', border_style='#888888'))
         grid.add_row(*row)
 
     return Panel(grid, title='[orange]▌ СТАТИСТИКА[/orange]',
-                 border_style='gray', padding=(0, 0))
+                 border_style='#888888', padding=(0, 0))
 
 
 def build_bookings():
     """Таблица записей."""
-    table = Table(border_style='gray', row_styles=['', 'dim'],
-                  header_style='orange bold', expand=True)
+    table = Table(border_style='#888888', row_styles=['', 'dim'],
+                  header_style='#ff8c42 bold', expand=True)
     table.add_column('#', justify='center', width=4)
     table.add_column('Клиент', width=20)
     table.add_column('Услуга', width=20)
@@ -156,13 +156,13 @@ def build_bookings():
         table.add_row('—', 'Нет записей', '', '', '', '')
 
     return Panel(table, title='[orange]▌ ЗАПИСИ[/orange]',
-                 border_style='gray', padding=(0, 0))
+                 border_style='#888888', padding=(0, 0))
 
 
 def build_portfolio():
     """Таблица портфолио."""
-    table = Table(border_style='gray', row_styles=['', 'dim'],
-                  header_style='orange bold', expand=True)
+    table = Table(border_style='#888888', row_styles=['', 'dim'],
+                  header_style='#ff8c42 bold', expand=True)
     table.add_column('#', justify='center', width=4)
     table.add_column('Название', width=25)
     table.add_column('Стиль', width=15)
@@ -177,13 +177,13 @@ def build_portfolio():
         table.add_row('—', 'Нет работ', '', '')
 
     return Panel(table, title='[orange]▌ ПОРТФОЛИО[/orange]',
-                 border_style='gray', padding=(0, 0))
+                 border_style='#888888', padding=(0, 0))
 
 
 def build_reviews():
     """Последние отзывы."""
-    table = Table(border_style='gray', row_styles=['', 'dim'],
-                  header_style='orange bold', expand=True)
+    table = Table(border_style='#888888', row_styles=['', 'dim'],
+                  header_style='#ff8c42 bold', expand=True)
     table.add_column('Клиент', width=15)
     table.add_column('Оценка', justify='center', width=8)
     table.add_column('Текст')
@@ -201,7 +201,7 @@ def build_reviews():
         table.add_row('Нет отзывов', '', '', '')
 
     return Panel(table, title='[orange]▌ ОТЗЫВЫ[/orange]',
-                 border_style='gray', padding=(0, 0))
+                 border_style='#888888', padding=(0, 0))
 
 
 def build_layout():
