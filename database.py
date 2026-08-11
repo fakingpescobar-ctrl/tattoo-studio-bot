@@ -272,7 +272,12 @@ def delete_booking(booking_id):
 
 def get_booking_by_id(booking_id):
     conn = get_db()
-    row = conn.execute('SELECT * FROM bookings WHERE id = ?', (booking_id,)).fetchone()
+    row = conn.execute(
+        '''SELECT b.*, u.username, u.first_name
+           FROM bookings b
+           LEFT JOIN users u ON b.user_id = u.id
+           WHERE b.id = ?''', (booking_id,)
+    ).fetchone()
     conn.close()
     return row
 
