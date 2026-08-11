@@ -16,13 +16,15 @@ from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual.reactive import reactive
-from textual.widgets import (DataTable, Footer, Header, Label, TabbedContent,
-                             TabPane)
+from textual.screen import ModalScreen
+from textual.widgets import (Button, DataTable, Footer, Header, Label,
+                             TabbedContent, TabPane)
 from textual.widgets._tabbed_content import ContentTabs
 
 from config import BOT_CITY, BOT_HANDLE, BOT_MASTER, BOT_NAME
-from database import (get_all_bookings, get_portfolio, get_rating_stats,
-                      get_reviews, get_services)
+from database import (delete_booking, get_all_bookings, get_booking_by_id,
+                      get_portfolio, get_rating_stats, get_reviews,
+                      get_services, update_booking_status)
 
 _started = time.monotonic()
 
@@ -33,6 +35,103 @@ STATUS_RU = {
     'cancelled': '❌ Отменена',
     'client_cancelled': '🚫 Отказ клиента',
 }
+
+
+class BookingActionScreen(ModalScreen):
+    """Модальный экран с действиями для выбранной записи."""
+
+    CSS = """
+    BookingActionScreen {
+        align: center middle;
+    }
+    BookingActionScreen > Vertical {
+        background: #000000;
+        border: round #9d4edd;
+        padding: 1 2;
+        width: 60;
+        height: auto;
+    }
+    BookingActionScreen Label {
+        color: #ff8c42;
+        text-style: bold;
+        padding: 0 1;
+    }
+    BookingActionScreen Label.detail {
+        color: #888888;
+        text-style: none;
+        padding: 0 1;
+    }
+    BookingActionScreen Horizontal {
+        height: 3;
+        padding: 1 0 0 0;
+    }
+    BookingActionScreen Button {
+        margin: 0 1;
+        background: #1a1a1a;
+        color: #ff8c42;
+        border: solid #888888;
+    }
+    BookingActionScreen Button:hover {
+        background: #2a2a2a;
+    }
+    BookingActionScreen Button.confirm {
+        border: solid #2ed573;
+    }
+    BookingActionScreen Button.danger {
+        border: solid #ff4757;
+    }
+    """
+
+    BINDINGS = [Binding('escape', 'dismiss', 'Отмена')]
+
+    def __init__(self, booking_id):
+        super().__init__()
+        self.booking_id = booking_id
+
+    def compose(self) -> ComposeResult:
+        b = get_booking_by_id(self.booking_id)
+        with Vertical():
+            if not b:
+                yield Label('Запись не найдена')
+                with Horizontal():
+                    yield Button('Закрыть', id='close')
+                return
+
+            name = b['first_name'] or 'Клиент'
+            if b['username']:
+                name += f" @{b['username']}"
+            status = STATUS_RU.get(b['status'], b['status'])
+
+            yield Label(f'ЗАПИСЬ #{b["id"]}')
+            yield Label(f'Клиент: {name}', classes='detail')
+            yield Label(f'Услуга: {b["service"] or "—"}', classes='detail')
+            yield Label(f'Дата: {b["date_time"]}', classes='detail')
+            yield Label(f'Статус: {status}', classes='detail')
+            yield Label(f'Описание: {b["description"] or "—"}', classes='detail')
+
+            with Horizontal():
+                yield Button('✅ Подтвердить', id='confirm', classes='confirm')
+                yield Button('✨ Завершить', id='complete')
+            with Horizontal():
+                yield Button('❌ Отменить', id='cancel', classes='danger')
+                yield Button('🗑 Удалить', id='delete', classes='danger')
+            with Horizontal():
+                yield Button('◀ Закрыть', id='close')
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        bid = self.booking_id
+        action = event.button.id
+
+        if action == 'confirm':
+            update_booking_status(bid, 'confirmed')
+        elif action == 'complete':
+            update_booking_status(bid, 'completed')
+        elif action == 'cancel':
+            update_booking_status(bid, 'cancelled')
+        elif action == 'delete':
+            delete_booking(bid)
+
+        self.dismiss(action)
 
 
 def _uptime():
@@ -234,14 +333,30 @@ class PrizmaTUI(App):
         table = self.query_one('#bookings-table', DataTable)
         table.clear(columns=True)
         table.add_columns('#', 'Клиент', 'Услуга', 'Дата', 'Статус', 'Описание')
+        self._booking_row_ids = {}  # row_key → booking_id
         for b in get_all_bookings():
             name = b['first_name'] or 'Клиент'
             if b['username']:
                 name += f" @{b['username']}"
             status = STATUS_RU.get(b['status'], b['status'])
             desc = (b['description'] or '')[:40]
-            table.add_row(str(b['id']), name, b['service'] or '',
-                          b['date_time'], status, desc)
+            row_key = table.add_row(str(b['id']), name, b['service'] or '',
+                                    b['date_time'], status, desc)
+            self._booking_row_ids[row_key] = b['id']
+
+    def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
+        """Клик по строке записей → открыть модал действий."""
+        table_id = event.data_table.id
+        if table_id != 'bookings-table':
+            return
+        row_key = event.row_key
+        booking_id = getattr(self, '_booking_row_ids', {}).get(row_key)
+        if booking_id is None:
+            return
+        def _on_dismiss(action):
+            if action and action != 'close':
+                self._refresh_all()
+        self.push_screen(BookingActionScreen(booking_id), _on_dismiss)
 
     def _load_portfolio(self):
         table = self.query_one('#portfolio-table', DataTable)
