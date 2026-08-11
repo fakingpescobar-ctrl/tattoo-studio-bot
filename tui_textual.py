@@ -212,6 +212,7 @@ class PrizmaTUI(App):
         Binding('3', 'switch_tab("portfolio")', 'Портфолио'),
         Binding('r', 'refresh', 'Обновить'),
         Binding('q', 'quit', 'Выход'),
+        Binding('enter', 'open_selected', 'Действие'),
     ]
 
     uptime = reactive('0с')
@@ -274,6 +275,10 @@ class PrizmaTUI(App):
     def on_mount(self) -> None:
         self.title = 'PRIZMA TATTOO STUDIO'
         self.sub_title = f'{BOT_MASTER}  ◇  @{BOT_HANDLE}'
+        # Кликабельные строки в таблицах
+        self.query_one('#bookings-table', DataTable).cursor_type = 'row'
+        self.query_one('#portfolio-table', DataTable).cursor_type = 'row'
+        self.query_one('#upcoming-table', DataTable).cursor_type = 'row'
         self._refresh_all()
         self.set_interval(5, self._refresh_all)
 
@@ -371,6 +376,18 @@ class PrizmaTUI(App):
 
     def action_refresh(self) -> None:
         self._refresh_all()
+
+    def action_open_selected(self) -> None:
+        """Enter на записи → открыть модал действий."""
+        focused = self.focused
+        if isinstance(focused, DataTable) and focused.id == 'bookings-table':
+            row_key = focused.coordinate_to_row_key(focused.cursor_coordinate)
+            booking_id = getattr(self, '_booking_row_ids', {}).get(row_key)
+            if booking_id is not None:
+                def _on_dismiss(action):
+                    if action and action != 'close':
+                        self._refresh_all()
+                self.push_screen(BookingActionScreen(booking_id), _on_dismiss)
 
 
 def run_textual():
