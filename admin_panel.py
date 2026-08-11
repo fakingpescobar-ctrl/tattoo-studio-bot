@@ -404,6 +404,7 @@ class AdminPanel(tk.Tk):
         cb_values = ['all'] + list(STATUS_RU.keys())
         cb = ttk.Combobox(filt, textvariable=self.status_var,
                           values=cb_values, state='readonly', width=18)
+        cb.set('all')  # явный дефолт
         cb.pack(side='left', padx=8)
         cb.bind('<<ComboboxSelected>>', lambda e: self._load_bookings())
 
