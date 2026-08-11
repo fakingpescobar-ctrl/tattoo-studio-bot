@@ -81,7 +81,7 @@ class PrizmaTUI(App):
         color: #9d4edd;
         text-style: bold;
         text-align: center;
-        font-size: 2;
+        text-size: 2;
         padding: 0 1 1 1;
     }
     TabbedContent ContentTabs {
