@@ -66,22 +66,22 @@ class PrizmaTUI(App):
         color: #9d4edd;
         padding: 0 1;
     }
-    Label.status {
-        color: #ff8c42;
+    Horizontal.metrics-row {
+        height: 3;
         padding: 0 1;
-        text-align: right;
+    }
+    Label.metric {
+        color: #ff8c42;
+        padding: 0 2;
+        text-style: bold;
+        border: round #888888;
+        margin: 0 1;
+        content-align: center middle;
     }
     Label.stat-label {
         color: #ff8c42;
         text-style: bold;
-        text-align: center;
         padding: 1;
-    }
-    Label.stat-value {
-        color: #9d4edd;
-        text-style: bold;
-        text-align: center;
-        padding: 0 1 1 1;
     }
     TabbedContent ContentTabs {
         background: #0a0a0a;
@@ -114,7 +114,7 @@ class PrizmaTUI(App):
 
     BINDINGS = [
         Binding('q', 'quit', 'Выход'),
-        Binding('1', 'switch_tab("stats")', 'Статистика'),
+        Binding('1', 'switch_tab("home")', 'Главная'),
         Binding('2', 'switch_tab("bookings")', 'Записи'),
         Binding('3', 'switch_tab("portfolio")', 'Портфолио'),
         Binding('r', 'refresh', 'Обновить'),
@@ -139,19 +139,26 @@ class PrizmaTUI(App):
     def compose(self) -> ComposeResult:
         yield Header(show_clock=False)
 
-        # Шапка с логотипом
+        # Шапка: логотип + метрики в одну строку
         with Vertical():
             for line in self._logo_text:
                 yield Label(line, classes='logo')
             yield Label(f'{BOT_MASTER}  ◇  @{BOT_HANDLE}',
                         classes='subtitle')
-            yield Label(self._bot_status_line(), classes='status')
-            yield Label(id='uptime-label', classes='status')
+
+            # Строка метрик рядом с вкладками
+            with Horizontal(classes='metrics-row'):
+                yield Label(id='m-rating', classes='metric')
+                yield Label(id='m-reviews', classes='metric')
+                yield Label(id='m-total', classes='metric')
+                yield Label(id='m-active', classes='metric')
+                yield Label(self._bot_status_line(), classes='metric')
+                yield Label(id='uptime-label', classes='metric')
 
             # Вкладки
-            with TabbedContent(initial='stats'):
-                with TabPane('▌ СТАТИСТИКА', id='stats'):
-                    yield from self._compose_stats()
+            with TabbedContent(initial='home'):
+                with TabPane('▌ ГЛАВНАЯ', id='home'):
+                    yield from self._compose_home()
                 with TabPane('▌ ЗАПИСИ', id='bookings'):
                     yield DataTable(id='bookings-table')
                 with TabPane('▌ ПОРТФОЛИО', id='portfolio'):
@@ -163,33 +170,12 @@ class PrizmaTUI(App):
         from config import BOT_TOKEN, MAX_TOKEN
         tg = '✅ TG' if (BOT_TOKEN and BOT_TOKEN != 'YOUR_TELEGRAM_BOT_TOKEN_HERE') else '❌ TG'
         mx = '✅ MAX' if MAX_TOKEN else '❌ MAX'
-        return f'{tg}  {mx}'
+        return f'{tg} {mx}'
 
-    def _compose_stats(self) -> ComposeResult:
-        labels = [
-            ('stat-services', '💰 УСЛУГИ'),
-            ('stat-portfolio', '🎨 РАБОТЫ'),
-            ('stat-reviews', '⭐ ОТЗЫВЫ'),
-            ('stat-rating', '🏆 РЕЙТИНГ'),
-            ('stat-total', '📅 ВСЕГО'),
-            ('stat-active', '🔔 АКТИВНО'),
-        ]
-        # Сетка 2x3
-        with Horizontal():
-            with Vertical():
-                yield Label('💰 УСЛУГИ', classes='stat-label')
-                yield Label('—', id='stat-services', classes='stat-value')
-                yield Label('⭐ ОТЗЫВЫ', classes='stat-label')
-                yield Label('—', id='stat-reviews', classes='stat-value')
-                yield Label('📅 ВСЕГО', classes='stat-label')
-                yield Label('—', id='stat-total', classes='stat-value')
-            with Vertical():
-                yield Label('🎨 РАБОТЫ', classes='stat-label')
-                yield Label('—', id='stat-portfolio', classes='stat-value')
-                yield Label('🏆 РЕЙТИНГ', classes='stat-label')
-                yield Label('—', id='stat-rating', classes='stat-value')
-                yield Label('🔔 АКТИВНО', classes='stat-label')
-                yield Label('—', id='stat-active', classes='stat-value')
+    def _compose_home(self) -> ComposeResult:
+        """Главная — ближайшие записи."""
+        yield Label('▌ БЛИЖАЙШИЕ ЗАПИСИ', classes='stat-label')
+        yield DataTable(id='upcoming-table')
 
     def on_mount(self) -> None:
         self.title = 'PRIZMA TATTOO STUDIO'
@@ -199,29 +185,55 @@ class PrizmaTUI(App):
 
     def watch_uptime(self, val: str) -> None:
         label = self.query_one('#uptime-label', Label)
-        label.update(f'⏱ {val}  ◇  📍 {BOT_CITY}  ◇  ↻ {datetime.now().strftime("%H:%M:%S")}')
+        label.update(f'⏱ {val}')
 
     def _refresh_all(self) -> None:
         self.uptime = _uptime()
-        self._load_stats()
+        self._load_metrics()
+        self._load_upcoming()
         self._load_bookings()
         self._load_portfolio()
 
-    def _load_stats(self):
-        services = get_services()
-        portfolio = get_portfolio()
+    def _load_metrics(self):
+        """Метрики в шапке: рейтинг / отзывы / всего / активно."""
         reviews = get_reviews()
         avg, cnt = get_rating_stats()
         bookings = get_all_bookings()
         active = [b for b in bookings if b['status'] in ('pending', 'confirmed')]
         rating = f'{avg:.1f}' if cnt else '—'
 
-        self.query_one('#stat-services', Label).update(str(len(services)))
-        self.query_one('#stat-portfolio', Label).update(str(len(portfolio)))
-        self.query_one('#stat-reviews', Label).update(str(cnt))
-        self.query_one('#stat-rating', Label).update(rating)
-        self.query_one('#stat-total', Label).update(str(len(bookings)))
-        self.query_one('#stat-active', Label).update(str(len(active)))
+        self.query_one('#m-rating', Label).update(f'🏆 {rating}')
+        self.query_one('#m-reviews', Label).update(f'⭐ {cnt}')
+        self.query_one('#m-total', Label).update(f'📅 {len(bookings)}')
+        self.query_one('#m-active', Label).update(f'🔔 {len(active)}')
+
+    def _load_upcoming(self):
+        """Ближайшие записи на главной вкладке."""
+        table = self.query_one('#upcoming-table', DataTable)
+        table.clear(columns=True)
+        table.add_columns('#', 'Клиент', 'Услуга', 'Дата', 'Время', 'Статус')
+
+        bookings = get_all_bookings()
+        active = [b for b in bookings if b['status'] in ('pending', 'confirmed')]
+
+        # Сортировка по дате
+        def parse_date(b):
+            try:
+                return datetime.strptime((b['date_time'] or '').strip(), '%d.%m.%Y %H:%M')
+            except (ValueError, TypeError):
+                return datetime.max
+
+        active.sort(key=parse_date)
+        for b in active[:10]:
+            name = b['first_name'] or 'Клиент'
+            if b['username']:
+                name += f' @{b["username"]}'
+            dt_str = b['date_time'] or ''
+            date_part = dt_str[:10] if len(dt_str) >= 10 else dt_str
+            time_part = dt_str[11:16] if len(dt_str) >= 16 else ''
+            status = STATUS_RU.get(b['status'], b['status'])
+            table.add_row(str(b['id']), name, b['service'] or '',
+                          date_part, time_part, status)
 
     def _load_bookings(self):
         table = self.query_one('#bookings-table', DataTable)
