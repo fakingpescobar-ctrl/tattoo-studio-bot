@@ -236,8 +236,11 @@ class PrizmaTUI(App):
 
         # Шапка: логотип + метрики в одну строку
         with Vertical():
+            self._logo_labels = []
             for line in self._logo_text:
-                yield Label(line, classes='logo')
+                lbl = Label(line, classes='logo')
+                self._logo_labels.append(lbl)
+                yield lbl
 
             # Строка метрик рядом с вкладками
             with Horizontal(classes='metrics-row'):
@@ -279,6 +282,26 @@ class PrizmaTUI(App):
         self.query_one('#upcoming-table', DataTable).cursor_type = 'row'
         self._refresh_all()
         self.set_interval(5, self._refresh_all)
+        # Анимация логотипа — переливание цвета каждые 150мс
+        self._logo_phase = 0
+        self.set_interval(0.15, self._animate_logo)
+
+    def _animate_logo(self) -> None:
+        """Переливающийся градиент для логотипа (cyan→purple→pink→cyan)."""
+        import math
+        phase = self._logo_phase
+        labels = getattr(self, '_logo_labels', [])
+        n = max(1, len(labels))
+        for i, lbl in enumerate(labels):
+            # Смещение фазы по строкам + общий сдвиг по времени
+            t = (math.sin(phase + i * 0.3) + 1) / 2  # 0..1
+            # Градиент: фиолетовый (157,23,221) ←→ голубой (64,224,240)
+            r = int(64 + (157 - 64) * t)
+            g = int(80 + (23 - 80) * t)
+            b = int(200 + (221 - 200) * t)
+            color = f'#{r:02x}{g:02x}{b:02x}'
+            lbl.styles.color = color
+        self._logo_phase += 0.15
 
     def watch_uptime(self, val: str) -> None:
         label = self.query_one('#uptime-label', Label)
