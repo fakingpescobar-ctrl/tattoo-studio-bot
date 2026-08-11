@@ -111,15 +111,15 @@ def apply_retro_style(root):
     except Exception:
         pass
 
-    # Treeview — таблицы (текст оранжевый, фон чёрный)
+    # Treeview — таблицы (без рамки, текст оранжевый, фон чуть светлее чёрного)
     style.configure('Treeview',
                     background=Palette.BG_CARD,
                     foreground=Palette.ORANGE,
                     fieldbackground=Palette.BG_CARD,
-                    borderwidth=1,
-                    relief='solid',
+                    borderwidth=0,
+                    relief='flat',
                     rowheight=26)
-    # Заголовки таблиц — серый фон, оранжевый текст (читаемо)
+    # Заголовки таблиц — серый фон, оранжевый текст
     style.configure('Treeview.Heading',
                     background=Palette.GRAY,
                     foreground=Palette.ORANGE,
@@ -128,13 +128,13 @@ def apply_retro_style(root):
                     padding=6)
     style.map('Treeview.Heading',
               background=[('active', '#aaaaaa')])
-    # Выделенная строка — серый фон, оранжевый текст остаётся читаемым
+    # Выделенная строка — серый фон
     style.map('Treeview',
               background=[('selected', Palette.GRAY)],
               foreground=[('selected', Palette.ORANGE)])
     style.configure('Vertical.TScrollbar',
                     background=Palette.GRAY,
-                    troughcolor=Palette.BG_PANEL,
+                    troughcolor=Palette.BG,
                     arrowcolor=Palette.ORANGE,
                     borderwidth=0)
 
@@ -214,21 +214,19 @@ class RetroButton(tk.Frame):
 # ============ РЕТРО КАРТОЧКА ============
 
 class RetroCard(tk.Frame):
-    """Карточка статистики: серая подпись + фиолетовые цифры на чёрном."""
+    """Карточка статистики: без рамки, серая подпись + фиолетовые цифры."""
 
     def __init__(self, parent, label, accent=Palette.PURPLE):
         super().__init__(parent, bg=Palette.BG_CARD,
-                         highlightthickness=2,
-                         highlightbackground=Palette.GRAY,
-                         highlightcolor=Palette.GRAY,
+                         highlightthickness=0,
                          bd=0)
         tk.Label(self, text=label, bg=Palette.BG_CARD,
                  fg=Palette.ORANGE,
-                 font=('Consolas', 9, 'bold')).pack(pady=(8, 0))
+                 font=('Consolas', 9, 'bold')).pack(pady=(10, 0))
         self.value_var = tk.StringVar(value="—")
         tk.Label(self, textvariable=self.value_var,
                  bg=Palette.BG_CARD, fg=Palette.PURPLE,
-                 font=('Consolas', 24, 'bold')).pack(pady=(0, 8))
+                 font=('Consolas', 24, 'bold')).pack(pady=(0, 10))
 
 
 # ============ ПАНЕЛЬ ============
@@ -375,13 +373,8 @@ class AdminPanel(tk.Tk):
                  bg=Palette.BG, fg=Palette.ORANGE,
                  font=('Consolas', 10, 'bold')).pack(anchor='w', pady=(0, 4))
 
-        tree_frame = tk.Frame(rev_frame, bg=Palette.BG_CARD,
-                              highlightthickness=2,
-                              highlightbackground=Palette.ORANGE_DIM)
-        tree_frame.pack(fill='both', expand=True)
-
         cols = ('user', 'rating', 'text', 'date')
-        self.reviews_tree = ttk.Treeview(tree_frame, columns=cols,
+        self.reviews_tree = ttk.Treeview(rev_frame, columns=cols,
                                           show='headings', height=5)
         self.reviews_tree.heading('user', text='КЛИЕНТ')
         self.reviews_tree.heading('rating', text='ОЦЕНКА')
@@ -391,7 +384,7 @@ class AdminPanel(tk.Tk):
         self.reviews_tree.column('rating', width=80, anchor='center')
         self.reviews_tree.column('text', width=400)
         self.reviews_tree.column('date', width=120)
-        sb = ttk.Scrollbar(tree_frame, orient='vertical',
+        sb = ttk.Scrollbar(rev_frame, orient='vertical',
                             command=self.reviews_tree.yview)
         self.reviews_tree.configure(yscrollcommand=sb.set)
         self.reviews_tree.pack(side='left', fill='both', expand=True)
@@ -420,23 +413,17 @@ class AdminPanel(tk.Tk):
         entry = tk.Entry(filt, textvariable=self.search_var, width=22,
                          bg=Palette.BG_INPUT, fg=Palette.ORANGE,
                          insertbackground=Palette.ORANGE,
-                         font=('Consolas', 9), relief='solid',
-                         bd=1, highlightthickness=1,
-                         highlightbackground=Palette.ORANGE_DIM)
+                         font=('Consolas', 9), relief='flat',
+                         bd=0, highlightthickness=0)
         entry.pack(side='left', padx=8, ipady=3)
         entry.bind('<KeyRelease>', lambda e: self._load_bookings())
 
         RetroButton(filt, "⟳ ОБНОВИТЬ", self._load_bookings,
                     bg=Palette.ORANGE_DIM, hover_bg=Palette.ORANGE).pack(side='right')
 
-        # Таблица
-        tree_frame = tk.Frame(parent, bg=Palette.BG_CARD,
-                              highlightthickness=2,
-                              highlightbackground=Palette.ORANGE_DIM)
-        tree_frame.pack(fill='both', expand=True, padx=12, pady=4)
-
+        # Таблица (без рамки-обёртки)
         cols = ('id', 'client', 'service', 'date', 'status', 'desc')
-        self.tree = ttk.Treeview(tree_frame, columns=cols, show='headings')
+        self.tree = ttk.Treeview(parent, columns=cols, show='headings')
         self.tree.heading('id', text='#')
         self.tree.heading('client', text='КЛИЕНТ')
         self.tree.heading('service', text='УСЛУГА')
@@ -450,11 +437,11 @@ class AdminPanel(tk.Tk):
         self.tree.column('status', width=140)
         self.tree.column('desc', width=240)
 
-        sb = ttk.Scrollbar(tree_frame, orient='vertical',
+        sb = ttk.Scrollbar(parent, orient='vertical',
                             command=self.tree.yview)
         self.tree.configure(yscrollcommand=sb.set)
-        self.tree.pack(side='left', fill='both', expand=True)
-        sb.pack(side='right', fill='y')
+        self.tree.pack(fill='both', expand=True, padx=12, pady=4)
+        sb.pack(side='right', fill='y', padx=(0, 12))
 
         # Цветные теги для строк
         for status, bg in Palette.STATUS_BG.items():
@@ -487,12 +474,9 @@ class AdminPanel(tk.Tk):
         RetroButton(top, "⟳ ОБНОВИТЬ", self._load_portfolio,
                     bg=Palette.ORANGE_DIM, hover_bg=Palette.ORANGE).pack(side='right')
 
-        tree_frame = tk.Frame(parent, bg=Palette.BG_CARD,
-                              highlightthickness=2,
-                              highlightbackground=Palette.ORANGE_DIM)
-        tree_frame.pack(fill='both', expand=True, padx=12, pady=4)
+        # Таблица (без рамки-обёртки)
         cols = ('id', 'title', 'style', 'desc')
-        self.port_tree = ttk.Treeview(tree_frame, columns=cols, show='headings')
+        self.port_tree = ttk.Treeview(parent, columns=cols, show='headings')
         self.port_tree.heading('id', text='#')
         self.port_tree.heading('title', text='НАЗВАНИЕ')
         self.port_tree.heading('style', text='СТИЛЬ')
@@ -501,11 +485,11 @@ class AdminPanel(tk.Tk):
         self.port_tree.column('title', width=200)
         self.port_tree.column('style', width=120)
         self.port_tree.column('desc', width=380)
-        sb = ttk.Scrollbar(tree_frame, orient='vertical',
+        sb = ttk.Scrollbar(parent, orient='vertical',
                             command=self.port_tree.yview)
         self.port_tree.configure(yscrollcommand=sb.set)
-        self.port_tree.pack(side='left', fill='both', expand=True)
-        sb.pack(side='right', fill='y')
+        self.port_tree.pack(fill='both', expand=True, padx=12, pady=4)
+        sb.pack(side='right', fill='y', padx=(0, 12))
 
         actions = tk.Frame(parent, bg=Palette.BG)
         actions.pack(fill='x', padx=12, pady=(6, 12))
