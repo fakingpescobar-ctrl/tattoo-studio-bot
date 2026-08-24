@@ -8,15 +8,12 @@ echo ========================================
 echo   Tattoo Bot - tatoo_asbest_best_bot
 echo ========================================
 echo.
-echo Checking for running instances...
+echo Killing old instances...
 
-REM Kill old instances (only main.py)
-for /f "tokens=2" %%i in ('wmic process where "commandline like '%%main.py%%' and name='python.exe'" get processid /value 2^>nul ^| find "ProcessId="') do (
-    echo Killing old instance PID: %%i
-    taskkill /F /PID %%i >nul 2>&1
-)
+REM Убиваем все python.exe запущенные из этой директории (main.py и его subprocess'ы)
+powershell -NoProfile -Command ^
+  "$procs = Get-CimInstance Win32_Process -Filter \"Name='python.exe'\" | Where-Object { $_.CommandLine -match 'tattoo_bot' }; foreach ($p in $procs) { Write-Host ('Killing PID: ' + $p.ProcessId); Stop-Process -Id $p.ProcessId -Force -ErrorAction SilentlyContinue }; Start-Sleep -Seconds 2"
 
-timeout /t 2 /nobreak >nul
 echo.
 echo Starting bot...
 echo ----------------------------------------

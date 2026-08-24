@@ -8,7 +8,7 @@ import threading
 import time
 from datetime import datetime
 
-from config import MAX_TOKEN, MAX_ADMIN_ID
+from config import MAX_TOKEN, MAX_ADMIN_ID, BOT_ADDRESS
 from database import *
 from logging.handlers import RotatingFileHandler
 
@@ -101,7 +101,7 @@ def main():
                         msg = (f"🔔 <b>Напоминание о записи!</b>\n\n"
                                f"📝 {b['service']}\n"
                                f"📅 {when}\n\n"
-                               f"📍 г. Асбест, ул. Заводская, 4\n"
+                               f"📍 {BOT_ADDRESS}\n"
                                f"Пожалуйста, приходите за 15 минут до сеанса! 💛")
                         client.send_message(b['user_id'], msg)
                         mark_booking_notified(b['id'])

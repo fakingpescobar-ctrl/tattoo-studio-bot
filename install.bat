@@ -5,7 +5,7 @@ echo ===================================
 echo.
 
 echo [1/3] Установка зависимостей...
-pip install aiogram python-dotenv
+pip install -r requirements.txt
 
 if %errorlevel% neq 0 (
     echo Ошибка при установке зависимостей!
@@ -25,7 +25,7 @@ if not exist .env (
 
 echo.
 echo [3/3] Инициализация базы данных...
-python main.py
+python -c "from database import init_db, add_sample_data; init_db(); add_sample_data()"
 
 if %errorlevel% neq 0 (
     echo.

@@ -12,6 +12,12 @@ BOT_MASTER = os.getenv('BOT_MASTER', 'Максим Андреевич')  # ма�
 BOT_HANDLE = os.getenv('BOT_HANDLE', 'tatoo_asbest_best_bot')  # username бота (без @)
 BOT_CITY = os.getenv('BOT_CITY', 'Асбест, ул. Заводская, 4')
 
+# Контактная информация мастера (используется в «О мастере» и уведомлениях)
+BOT_ADDRESS = os.getenv('BOT_ADDRESS', 'г. Асбест, ул. Заводская, 4')
+BOT_PHONE = os.getenv('BOT_PHONE', '+7 932 112-01-06')
+BOT_VK_URL = os.getenv('BOT_VK_URL', 'https://vk.ru/id880400434')
+BOT_VK_LABEL = os.getenv('BOT_VK_LABEL', 'ВКонтакте')
+
 BOT_TOKEN = os.getenv('BOT_TOKEN')
 if not BOT_TOKEN:
     print("[ERROR] BOT_TOKEN не найден в .env!")

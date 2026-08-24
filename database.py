@@ -8,8 +8,15 @@ from config import DB_PATH
 
 
 def get_db():
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH, timeout=30)
     conn.row_factory = sqlite3.Row
+    # WAL: конкурентные чтение+запись (боты TG/MAX пишут из разных процессов)
+    try:
+        conn.execute('PRAGMA journal_mode=WAL')
+        conn.execute('PRAGMA busy_timeout=30000')
+        conn.execute('PRAGMA foreign_keys=ON')
+    except sqlite3.Error:
+        pass  # WAL может быть недоступен на сетевых ФС — работаем в дефолтном режиме
     return conn
 
 def init_db():
@@ -214,16 +221,47 @@ def delete_portfolio_work(work_id):
 
 # ============ ЗАПИСИ ============
 
-def create_booking(user_id, service, description, date_time):
+def create_booking(user_id, service, description, date_time, status='pending'):
     conn = get_db()
     cursor = conn.cursor()
     cursor.execute('''
-        INSERT INTO bookings (user_id, service, description, date_time)
-        VALUES (?, ?, ?, ?)
-    ''', (user_id, service, description, date_time))
+        INSERT INTO bookings (user_id, service, description, date_time, status)
+        VALUES (?, ?, ?, ?, ?)
+    ''', (user_id, service, description, date_time, status))
     conn.commit()
     booking_id = cursor.lastrowid
     conn.close()
+    invalidate_cache('get_all_bookings')
+    return booking_id
+
+def create_booking_with_slot(user_id, service, description, date_time, slot_key):
+    """Атомарная бронь: запись + захват слота в одной транзакции.
+
+    Защита от гонки: если TG и MAX одновременно бронируют один слот,
+    UNIQUE-индекс blocked_slots.date_time пропустит только один INSERT.
+    Возвращает booking_id при успехе, None — если слот уже занят.
+    """
+    conn = get_db()
+    try:
+        conn.execute('BEGIN IMMEDIATE')
+        # Захват слота. INSERT (не OR IGNORE!) — конфликт UNIQUE = слот занят
+        cursor = conn.cursor()
+        cursor.execute(
+            'INSERT INTO blocked_slots (date_time) VALUES (?)', (slot_key,))
+        cursor.execute('''
+            INSERT INTO bookings (user_id, service, description, date_time)
+            VALUES (?, ?, ?, ?)
+        ''', (user_id, service, description, date_time))
+        booking_id = cursor.lastrowid
+        conn.commit()
+    except sqlite3.IntegrityError:
+        conn.rollback()
+        return None
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
     invalidate_cache('get_all_bookings')
     return booking_id
 
@@ -308,13 +346,24 @@ def add_blocked_slot(date_time):
         conn.close()
 
 def block_full_day(year, month, day):
-    """Блокировка всего рабочего дня (10:00-20:00)"""
+    """Блокировка всего рабочего дня (10:00-20:00).
+
+    Возвращает количество заблокированных слотов. Прошедшие даты/часы
+    не блокируются (нельзя заблокировать прошлое).
+    """
     conn = get_db()
+    now = datetime.now()
+    blocked_count = 0
     for hour in range(10, 21):
+        dt = datetime(year, month, day, hour, 0)
+        if dt <= now:
+            continue  # прошедший час — не блокируем
         slot = f"{year}-{month:02d}-{day:02d} {hour:02d}:00"
-        conn.execute('INSERT OR IGNORE INTO blocked_slots (date_time) VALUES (?)', (slot,))
+        cursor = conn.execute('INSERT OR IGNORE INTO blocked_slots (date_time) VALUES (?)', (slot,))
+        blocked_count += cursor.rowcount
     conn.commit()
     conn.close()
+    return blocked_count
 
 def unblock_slot(date_time):
     conn = get_db()

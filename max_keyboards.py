@@ -7,6 +7,8 @@
 import calendar
 from datetime import datetime
 
+from common import MONTHS_RU, WEEKDAYS_RU, BOOKING_STATUS_SHORT, price_short
+
 
 def kb(rows):
     """Оборачивает список рядов кнопок в attachments MAX."""
@@ -46,15 +48,8 @@ def get_back_keyboard():
 def get_services_keyboard(services):
     rows = []
     for s in services:
-        pmin = int(s['price_min'])
-        pmax = int(s['price_max'])
-        if pmin == 0 and pmax == 0:
-            price_str = "договорная"
-        elif pmin == pmax:
-            price_str = f"{pmin}₽"
-        else:
-            price_str = f"от {pmin}₽"
-        rows.append([_cb(f"{s['name']} — {price_str}", f"service_{s['id']}")])
+        rows.append([_cb(f"{s['name']} — {price_short(s['price_min'], s['price_max'])}",
+                         f"service_{s['id']}")])
     rows.append([_cb("◀️ В меню", "menu")])
     return kb(rows)
 
@@ -66,11 +61,6 @@ def get_confirmation_keyboard():
 
 
 # ============ КАЛЕНДАРЬ ============
-
-MONTHS_RU = ["", "Январь", "Февраль", "Март", "Апрель", "Май", "Июнь",
-             "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь"]
-WEEKDAYS_RU = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"]
-
 
 def _ign():
     return _cb(" ", "ignore")
@@ -193,8 +183,9 @@ def get_admin_time_keyboard(year, month, day, blocked_slots=None):
 
 def get_about_keyboard():
     """Кнопки контактов в разделе О мастере"""
+    from config import BOT_VK_LABEL, BOT_VK_URL
     return kb([
-        [_link("🌐 ВКонтакте", "https://vk.ru/id880400434")],
+        [_link(f"🌐 {BOT_VK_LABEL}", BOT_VK_URL)],
         [_cb("◀️ В меню", "menu")],
     ])
 
@@ -226,21 +217,45 @@ def get_admin_keyboard():
 
 def get_admin_bookings_keyboard(bookings):
     rows = []
-    status_map = {'pending': '⏳', 'confirmed': '✅', 'cancelled': '❌', 'completed': '✨'}
     for b in bookings[:10]:
         rows.append([_cb(
-            f"{status_map.get(b['status'], '⚠️')} #{b['id']} — {b['date_time'][:16]}",
+            f"{BOOKING_STATUS_SHORT.get(b['status'], '⚠️')} #{b['id']} — {b['date_time'][:16]}",
             f"admin_booking_{b['id']}")])
     rows.append([_cb("◀️ В админку", "admin")])
     return kb(rows)
 
 
-def get_admin_booking_actions(booking_id):
+def get_my_bookings_keyboard(bookings):
+    """Кнопки отмены для активных записей клиента (pending/confirmed)."""
+    rows = []
+    for b in bookings:
+        if b['status'] in ('pending', 'confirmed'):
+            rows.append([_cb(f"❌ Отменить запись #{b['id']}", f"my_cancel_{b['id']}")])
+    rows.append([_cb("◀️ В меню", "menu")])
+    return kb(rows)
+
+
+def get_confirm_cancel_keyboard(booking_id):
+    """Подтверждение отказа от записи со стороны клиента."""
     return kb([
-        [_cb("✅ Подтвердить", f"ab_confirm_{booking_id}"), _cb("✨ Завершить", f"ab_complete_{booking_id}")],
-        [_cb("❌ Отменить", f"ab_cancel_{booking_id}"), _cb("💬 Написать клиенту", f"ab_msg_{booking_id}")],
-        [_cb("◀️ Назад", "admin_bookings")],
+        [_cb("✅ Да, отказаться", f"confirm_my_cancel_{booking_id}")],
+        [_cb("◀️ Назад", "my_bookings")],
     ])
+
+
+def get_admin_booking_actions(booking_id, status=None):
+    rows = []
+    if status != 'client_cancelled':
+        rows.append([
+            _cb("✅ Подтвердить", f"ab_confirm_{booking_id}"),
+            _cb("✨ Завершить", f"ab_complete_{booking_id}"),
+        ])
+    rows.append([
+        _cb("❌ Отменить", f"ab_cancel_{booking_id}"),
+        _cb("💬 Написать клиенту", f"ab_msg_{booking_id}"),
+    ])
+    rows.append([_cb("◀️ Назад", "admin_bookings")])
+    return kb(rows)
 
 
 def get_admin_portfolio_keyboard(works):

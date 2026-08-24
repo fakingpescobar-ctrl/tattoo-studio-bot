@@ -12,7 +12,10 @@ from datetime import datetime
 from functools import wraps
 from collections import defaultdict
 
-from config import MAX_ADMIN_ID, MAX_ADMIN_IDS
+from config import (MAX_ADMIN_ID, MAX_ADMIN_IDS, BOT_ADDRESS, BOT_PHONE,
+                    BOT_VK_LABEL, BOT_VK_URL)
+from common import (ACTIVE_BOOKING_STATUSES, BOOKING_STATUS_RU,
+                    booking_to_slot_key, fmt_dt, price_text, slot_key)
 from database import *
 from max_keyboards import *
 
@@ -52,31 +55,6 @@ def refresh_overlay_async():
             refresh_overlay()
     except Exception:
         pass
-
-
-def fmt_dt(y, m, d, h):
-    return f"{d:02d}.{m:02d}.{y} {h:02d}:00"
-
-
-def slot_key(y, m, d, h):
-    return f"{y}-{m:02d}-{d:02d} {h:02d}:00"
-
-
-def booking_to_slot_key(date_time_str):
-    try:
-        dt = datetime.strptime(date_time_str.strip(), "%d.%m.%Y %H:%M")
-        return dt.strftime("%Y-%m-%d %H:%M")
-    except (ValueError, TypeError):
-        return None
-
-
-def price_text(pmin, pmax):
-    pmin, pmax = int(pmin), int(pmax)
-    if pmin == 0 and pmax == 0:
-        return "💵 Цена договорная"
-    if pmin == pmax:
-        return f"💵 {pmin}₽"
-    return f"💵 от {pmin} до {pmax}₽"
 
 
 def is_admin(user_id):
@@ -300,6 +278,10 @@ class MaxBot:
                     text=f"Вы поставили {'⭐' * rating}\n\nНапишите текст отзыва:")
             elif data == "my_bookings":
                 self.show_my_bookings(callback_id, user_id)
+            elif data.startswith("my_cancel_"):
+                self.client_cancel_booking(callback_id, user_id, int(data.split("_")[2]))
+            elif data.startswith("confirm_my_cancel_"):
+                self.confirm_client_cancel(callback_id, user_id, int(data.split("_")[3]))
             elif data == "booking_start":
                 save_state(user_id, 'booking_service')
                 self.start_booking(callback_id, user_id)
@@ -327,10 +309,7 @@ class MaxBot:
             elif data == "booking_confirm":
                 self.confirm_booking(callback_id, user_id)
             elif data == "booking_cancel":
-                clear_state(user_id)
-                self.client.callback_reply(callback_id,
-                    text="❌ Запись отменена.",
-                    attachments=get_main_menu(is_admin(user_id)))
+                self.cancel_booking_confirm(callback_id, user_id)
             elif data == "admin":
                 if is_admin(user_id):
                     self.client.callback_reply(callback_id,
@@ -385,9 +364,11 @@ class MaxBot:
             elif data.startswith("admin_block_day_"):
                 parts = data.split("_")
                 y, m, d = int(parts[3]), int(parts[4]), int(parts[5])
-                block_full_day(y, m, d)
+                cnt = block_full_day(y, m, d)
                 blocked = get_blocked_slots()
-                self.client.callback_reply(callback_id,
+                text = (f"🔒 Заблокировано слотов: {cnt}" if cnt
+                        else "⚠️ Нечего блокировать: день/часы уже прошли")
+                self.client.callback_reply(callback_id, text=text,
                     attachments=get_admin_time_keyboard(y, m, d, blocked))
             else:
                 logger.info(f"Unknown callback: {data}")
@@ -443,7 +424,7 @@ class MaxBot:
         self.client.callback_reply(callback_id, text=text, attachments=get_back_keyboard())
 
     def show_about(self, callback_id):
-        text = ("ℹ️ <b>О мастере</b>\n\nПриветствую любителей искусства тела и тех, кто мечтает выразить себя через татуировку! 🎨\n\nВоплощаю ваши самые смелые идеи в реальность ✨\n\n<b>Что я предлагаю:</b>\n✔️ <b>Индивидуальный дизайн</b> — создаю эскизы специально для вас\n✔️ <b>Высококачественные материалы</b> — только проверенные краски и инструменты\n✔️ <b>Комфортная атмосфера</b> — стерильно, уютно, дружелюбно\n\nЗапишитесь на консультацию прямо сейчас! 🔥\n\n<b>📍 Адрес:</b> г. Асбест, ул. Заводская, 4\n<b>📞 Телефон:</b> +7 932 112-01-06\n<b>🌐 ВКонтакте:</b> vk.ru/id880400434")
+        text = (f"ℹ️ <b>О мастере</b>\n\nПриветствую любителей искусства тела и тех, кто мечтает выразить себя через татуировку! 🎨\n\nВоплощаю ваши самые смелые идеи в реальность ✨\n\n<b>Что я предлагаю:</b>\n✔️ <b>Индивидуальный дизайн</b> — создаю эскизы специально для вас\n✔️ <b>Высококачественные материалы</b> — только проверенные краски и инструменты\n✔️ <b>Комфортная атмосфера</b> — стерильно, уютно, дружелюбно\n\nЗапишитесь на консультацию прямо сейчас! 🔥\n\n<b>📍 Адрес:</b> {BOT_ADDRESS}\n<b>📞 Телефон:</b> {BOT_PHONE}\n<b>🌐 {BOT_VK_LABEL}:</b> {BOT_VK_URL}")
         self.client.callback_reply(callback_id, text=text, attachments=get_about_keyboard())
 
     def show_reviews(self, callback_id):
@@ -460,15 +441,55 @@ class MaxBot:
 
     def show_my_bookings(self, callback_id, user_id):
         bookings = get_user_bookings(user_id)
-        status_map = {'pending': '⏳ Ожидает', 'confirmed': '✅ Подтверждена',
-                      'cancelled': '❌ Отменена', 'completed': '✨ Завершена'}
+        # Скрываем от клиента заявки, отменённые им на этапе подтверждения (status='cancelled'):
+        # для клиента это мусор, но виден мастеру в админ-панели.
+        bookings = [b for b in bookings if b['status'] != 'cancelled']
         if not bookings:
             text = "👤 <b>Мои записи</b>\n\nЗаписей нет."
         else:
             text = "👤 <b>Мои записи</b>\n\n"
             for b in bookings:
-                text += f"🎫 #{b['id']} | {b['service']}\n💡 {b['description']}\n📅 {b['date_time']}\nСтатус: {status_map.get(b['status'], '⚠️')}\n\n"
-        self.client.callback_reply(callback_id, text=text, attachments=get_back_keyboard())
+                text += f"🎫 #{b['id']} | {b['service']}\n💡 {b['description']}\n📅 {b['date_time']}\nСтатус: {BOOKING_STATUS_RU.get(b['status'], '⚠️')}\n\n"
+            if any(b['status'] in ACTIVE_BOOKING_STATUSES for b in bookings):
+                text += "Нажмите ❌ чтобы отказаться от активной записи:"
+        self.client.callback_reply(callback_id, text=text,
+                                   attachments=get_my_bookings_keyboard(bookings))
+
+    def client_cancel_booking(self, callback_id, user_id, booking_id):
+        """Клиент отменяет свою запись — статус client_cancelled, висит у мастера."""
+        b = get_booking_by_id(booking_id)
+        if not b or b['user_id'] != user_id:
+            self.client.callback_reply(callback_id, text="Запись не найдена")
+            return
+        if b['status'] not in ('pending', 'confirmed'):
+            self.client.callback_reply(callback_id, text="Эту запись уже нельзя отменить")
+            return
+        text = (f"❓ <b>Отказаться от записи #{booking_id}?</b>\n\n"
+                f"📝 {b['service']}\n📅 {b['date_time']}\n\n"
+                f"Мастер увидит ваш отказ. Запись удалится только после подтверждения мастером.")
+        self.client.callback_reply(callback_id, text=text,
+                                   attachments=get_confirm_cancel_keyboard(booking_id))
+
+    def confirm_client_cancel(self, callback_id, user_id, booking_id):
+        b = get_booking_by_id(booking_id)
+        if not b or b['user_id'] != user_id:
+            self.client.callback_reply(callback_id, text="Запись не найдена")
+            return
+        if b['status'] not in ('pending', 'confirmed'):
+            self.client.callback_reply(callback_id, text="Эту запись уже нельзя отменить")
+            return
+        update_booking_status(booking_id, 'client_cancelled')
+        u = get_user_by_id(user_id)
+        uname = f"@{u['username']}" if u and u['username'] else f"ID:{user_id}"
+        self.notify_admin(f"🚫 <b>Клиент отказался от записи #{booking_id}!</b>\n\n"
+                          f"👤 {uname}\n📝 {b['service']}\n📅 {b['date_time']}\n\n"
+                          f"Запись висит до вашего подтверждения. Нажмите «❌ Отменить» в карточке записи, чтобы удалить её и освободить слот.")
+        self.client.callback_reply(callback_id,
+            text=f"🚫 <b>Запись #{booking_id} отменена</b>\n\n"
+                 f"📝 {b['service']}\n📅 {b['date_time']}\n\n"
+                 f"Мастер уведомлён. Запись будет удалена после подтверждения мастером.",
+            attachments=get_main_menu(is_admin(user_id)))
+        threading.Thread(target=refresh_overlay_async, daemon=True).start()
 
     # ---------- бронирование ----------
 
@@ -535,14 +556,19 @@ class MaxBot:
 
     def confirm_booking(self, callback_id, user_id):
         d = get_state_data(user_id)
-        if not d.get('service_name') or not d.get('date_time'):
+        if not d.get('service_name') or not d.get('date_time') or not d.get('slot_key'):
+            clear_state(user_id)
             self.client.callback_reply(callback_id, text="⚠️ Данные записи не найдены. Начните заново.",
                                        attachments=get_main_menu(is_admin(user_id)))
             return
-        booking_id = create_booking(user_id, d['service_name'], d.get('description', ''), d['date_time'])
-        sk = d.get('slot_key')
-        if sk:
-            add_blocked_slot(sk)
+        booking_id = create_booking_with_slot(
+            user_id, d['service_name'], d.get('description', ''), d['date_time'], d['slot_key'])
+        if booking_id is None:
+            clear_state(user_id)
+            self.client.callback_reply(callback_id,
+                text="⏰ <b>Слот занят</b>\n\nЭто время только что забронировали. Выберите другое:",
+                attachments=get_main_menu(is_admin(user_id)))
+            return
         clear_state(user_id)
         text = (f"🎉 <b>Запись создана!</b>\n\nНомер: #{booking_id}\n📝 {d['service_name']}\n📅 {d['date_time']}\n\n📞 Мастер свяжется с вами. Приходите за 15 мин до записи!")
         self.client.callback_reply(callback_id, text=text, attachments=get_main_menu(is_admin(user_id)))
@@ -550,6 +576,20 @@ class MaxBot:
         uname = f"@{u['username']}" if u and u['username'] else f"ID:{user_id}"
         self.notify_admin(f"🔔 <b>Новая запись #{booking_id}!</b>\n\n👤 {uname}\n📝 {d['service_name']}\n💡 {d.get('description', '')}\n📅 {d['date_time']}")
         threading.Thread(target=refresh_overlay_async, daemon=True).start()
+
+    def cancel_booking_confirm(self, callback_id, user_id):
+        """Клиент отменяет запись на этапе подтверждения.
+        Заявка фиксируется у мастера со статусом cancelled (попадает в «отменённые»),
+        клиент возвращается в главное меню. Слот НЕ блокируется."""
+        d = get_state_data(user_id)
+        if d.get('service_name') and d.get('date_time'):
+            create_booking(user_id, d['service_name'], d.get('description', ''),
+                           d['date_time'], status='cancelled')
+            threading.Thread(target=refresh_overlay_async, daemon=True).start()
+        clear_state(user_id)
+        self.client.callback_reply(callback_id,
+            text="❌ Запись отменена.",
+            attachments=get_main_menu(is_admin(user_id)))
 
     # ---------- админ ----------
 
@@ -575,11 +615,12 @@ class MaxBot:
             return
         user = get_user_by_id(b['user_id'])
         uname = f"@{user['username']}" if user and user['username'] else f"ID:{b['user_id']}"
-        status_map = {'pending': '⏳ Ожидает', 'confirmed': '✅ Подтверждена',
-                      'cancelled': '❌ Отменена', 'completed': '✨ Завершена'}
-        text = (f"🎫 <b>Запись #{b['id']}</b>\n\n👤 {uname} ({user['first_name'] if user else ''})\n📝 {b['service']}\n💡 {b['description']}\n📅 {b['date_time']}\nСтатус: {status_map.get(b['status'], '⚠️')}")
+        status_line = BOOKING_STATUS_RU.get(b['status'], '⚠️')
+        if b['status'] == 'client_cancelled':
+            status_line += " — ждёт отмены мастером"
+        text = (f"🎫 <b>Запись #{b['id']}</b>\n\n👤 {uname} ({user['first_name'] if user else ''})\n📝 {b['service']}\n💡 {b['description']}\n📅 {b['date_time']}\nСтатус: {status_line}")
         self.client.callback_reply(callback_id, text=text,
-                                   attachments=get_admin_booking_actions(booking_id))
+                                   attachments=get_admin_booking_actions(booking_id, b['status']))
 
     def admin_booking_action(self, callback_id, user_id, action, booking_id):
         if not is_admin(user_id):
@@ -588,6 +629,10 @@ class MaxBot:
         b = get_booking_by_id(booking_id)
         if not b:
             self.client.answer_callback(callback_id)
+            return
+        if action in ("confirm", "complete") and b['status'] == 'client_cancelled':
+            self.client.callback_reply(callback_id,
+                text="Клиент уже отказался. Используйте «❌ Отменить»")
             return
         if action == "confirm":
             update_booking_status(booking_id, 'confirmed')

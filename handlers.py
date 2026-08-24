@@ -22,7 +22,10 @@ def timing(func):
             raise
     return wrapper
 
-from config import ADMIN_ID, ADMIN_IDS
+from config import (ADMIN_ID, ADMIN_IDS, BOT_ADDRESS, BOT_PHONE,
+                    BOT_VK_LABEL, BOT_VK_URL)
+from common import (ACTIVE_BOOKING_STATUSES, BOOKING_STATUS_RU,
+                    booking_to_slot_key, fmt_dt, price_text, slot_key)
 from database import *
 from keyboards import *
 
@@ -44,29 +47,6 @@ def refresh_overlay_async():
 logger = logging.getLogger(__name__)
 
 # Rate-limiting будет передан через параметры при регистрации
-
-def fmt_dt(y, m, d, h):
-    return f"{d:02d}.{m:02d}.{y} {h:02d}:00"
-
-def slot_key(y, m, d, h):
-    return f"{y}-{m:02d}-{d:02d} {h:02d}:00"
-
-def booking_to_slot_key(date_time_str):
-    """Конвертирует отображаемую дату записи (DD.MM.YYYY HH:MM) в ключ слота (YYYY-MM-DD HH:MM).
-    Возвращает None, если строку не удалось разобрать."""
-    try:
-        dt = datetime.strptime(date_time_str.strip(), "%d.%m.%Y %H:%M")
-        return dt.strftime("%Y-%m-%d %H:%M")
-    except (ValueError, TypeError):
-        return None
-
-def price_text(pmin, pmax):
-    pmin, pmax = int(pmin), int(pmax)
-    if pmin == 0 and pmax == 0:
-        return "💵 Цена договорная"
-    if pmin == pmax:
-        return f"💵 {pmin}₽"
-    return f"💵 от {pmin} до {pmax}₽"
 
 def is_admin(user_id):
     return user_id in ADMIN_IDS
@@ -193,10 +173,7 @@ def register_callbacks(bot, user_commands, rate_limit_window, rate_limit_count, 
             elif data == "booking_confirm":
                 confirm_booking(call)
             elif data == "booking_cancel":
-                database.clear_state(user_id)
-                bot.edit_message_text("❌ Запись отменена.",
-                                    call.message.chat.id, call.message.message_id,
-                                    reply_markup=get_main_menu(is_admin(user.id)))
+                cancel_booking_confirm(call)
             elif data == "admin":
                 if is_admin(user_id):
                     bot.edit_message_text("🔧 <b>Админ-панель</b>\n\nВыберите действие:",
@@ -248,9 +225,13 @@ def register_callbacks(bot, user_commands, rate_limit_window, rate_limit_count, 
             elif data.startswith("admin_block_day_"):
                 parts = data.split("_")
                 y, m, d = int(parts[3]), int(parts[4]), int(parts[5])
-                block_full_day(y, m, d)
-                bot.answer_callback_query(call.id,
-                    f"🔒 Весь день {d:02d}.{m:02d}.{y} заблокирован!", show_alert=True)
+                cnt = block_full_day(y, m, d)
+                if cnt:
+                    bot.answer_callback_query(call.id,
+                        f"🔒 День {d:02d}.{m:02d}.{y} заблокирован ({cnt} слотов)!", show_alert=True)
+                else:
+                    bot.answer_callback_query(call.id,
+                        "⚠️ Нечего блокировать: день/часы уже прошли", show_alert=True)
                 blocked = get_blocked_slots()
                 bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id,
                                             reply_markup=get_admin_time_keyboard(y, m, d, blocked))
@@ -330,21 +311,15 @@ def register_callbacks(bot, user_commands, rate_limit_window, rate_limit_count, 
         else:
             text = "💰 <b>Прайс-лист</b>\n\n"
             for s in services:
-                pmin = int(s['price_min'])
-                pmax = int(s['price_max'])
-                if pmin == 0 and pmax == 0:
-                    price_str = "💵 Цена договорная"
-                elif pmin == pmax:
-                    price_str = f"💵 {pmin}₽"
-                else:
-                    price_str = f"💵 от {pmin} до {pmax}₽"
-                text += f"▫️ <b>{s['name']}</b>\n   {price_str}\n   📝 {s['description']}\n\n"
+                text += (f"▫️ <b>{s['name']}</b>\n"
+                         f"   {price_text(s['price_min'], s['price_max'])}\n"
+                         f"   📝 {s['description']}\n\n")
             text += "Уточнить точную стоимость можно при консультации 💬"
         bot.edit_message_text(text, call.message.chat.id, call.message.message_id,
                               reply_markup=get_back_keyboard())
 
     def show_about(call):
-        text = ("ℹ️ <b>О мастере</b>\n\nПриветствую любителей искусства тела и тех, кто мечтает выразить себя через татуировку! 🎨\n\nВоплощаю ваши самые смелые идеи в реальность ✨\n\n<b>Что я предлагаю:</b>\n✔️ <b>Индивидуальный дизайн</b> — создаю эскизы специально для вас, учитывая ваши предпочтения и особенности тела\n✔️ <b>Высококачественные материалы</b> — работаю исключительно с проверенными красками и инструментами, обеспечивая безопасность и долговечность ваших татуировок\n✔️ <b>Комфортная атмосфера</b> — стерильно, уютно, дружелюбно\n\nНе упустите возможность стать обладателем уникальной татуировки! Запишитесь на консультацию прямо сейчас и сделайте первый шаг навстречу своему новому образу! 🔥\n\n<b>📍 Адрес:</b> г. Асбест, ул. Заводская, 4\n<b>📞 Телефон:</b> +7 932 112-01-06\n<b>🌐 ВКонтакте:</b> vk.ru/id880400434")
+        text = (f"ℹ️ <b>О мастере</b>\n\nПриветствую любителей искусства тела и тех, кто мечтает выразить себя через татуировку! 🎨\n\nВоплощаю ваши самые смелые идеи в реальность ✨\n\n<b>Что я предлагаю:</b>\n✔️ <b>Индивидуальный дизайн</b> — создаю эскизы специально для вас, учитывая ваши предпочтения и особенности тела\n✔️ <b>Высококачественные материалы</b> — работаю исключительно с проверенными красками и инструментами, обеспечивая безопасность и долговечность ваших татуировок\n✔️ <b>Комфортная атмосфера</b> — стерильно, уютно, дружелюбно\n\nНе упустите возможность стать обладателем уникальной татуировки! Запишитесь на консультацию прямо сейчас и сделайте первый шаг навстречу своему новому образу! 🔥\n\n<b>📍 Адрес:</b> {BOT_ADDRESS}\n<b>📞 Телефон:</b> {BOT_PHONE}\n<b>🌐 {BOT_VK_LABEL}:</b> {BOT_VK_URL}")
         bot.edit_message_text(text, call.message.chat.id, call.message.message_id,
                               reply_markup=get_about_keyboard())
 
@@ -363,16 +338,18 @@ def register_callbacks(bot, user_commands, rate_limit_window, rate_limit_count, 
 
     def show_my_bookings(call):
         bookings = get_user_bookings(call.from_user.id)
-        status_map = {'pending': '⏳ Ожидает', 'confirmed': '✅ Подтверждена',
-                      'cancelled': '❌ Отменена', 'completed': '✨ Завершена',
-                      'client_cancelled': '🚫 Отказ клиента (ожидает мастера)'}
+        # Скрываем от клиента заявки, отменённые им на этапе подтверждения (status='cancelled'):
+        # мастер отменяет через delete_booking (запись исчезает), клиент отменяет активную
+        # через 'client_cancelled'. Статус 'cancelled' — только от отказа до подтверждения,
+        # для клиента это мусор, но виден мастеру в админ-панели.
+        bookings = [b for b in bookings if b['status'] != 'cancelled']
         if not bookings:
             text = "👤 <b>Мои записи</b>\n\nЗаписей нет."
         else:
             text = "👤 <b>Мои записи</b>\n\n"
             for b in bookings:
-                text += f"🎫 #{b['id']} | {b['service']}\n💡 {b['description']}\n📅 {b['date_time']}\nСтатус: {status_map.get(b['status'], '⚠️')}\n\n"
-            if any(b['status'] in ('pending', 'confirmed') for b in bookings):
+                text += f"🎫 #{b['id']} | {b['service']}\n💡 {b['description']}\n📅 {b['date_time']}\nСтатус: {BOOKING_STATUS_RU.get(b['status'], '⚠️')}\n\n"
+            if any(b['status'] in ACTIVE_BOOKING_STATUSES for b in bookings):
                 text += "Нажмите ❌ чтобы отказаться от активной записи:"
         bot.edit_message_text(text, call.message.chat.id, call.message.message_id,
                               reply_markup=get_my_bookings_keyboard(bookings))
@@ -472,8 +449,30 @@ def register_callbacks(bot, user_commands, rate_limit_window, rate_limit_count, 
     def confirm_booking(call):
         user_id = call.from_user.id
         d = get_state_data(user_id)
-        booking_id = create_booking(user_id, d['service_name'], d.get('description', ''), d['date_time'])
-        add_blocked_slot(d['slot_key'])
+        if not d.get('service_name') or not d.get('date_time'):
+            database.clear_state(user_id)
+            bot.answer_callback_query(call.id, "Данные записи устарели. Начните заново.", show_alert=True)
+            bot.edit_message_text("⚠️ Данные записи не найдены. Начните заново.",
+                                  call.message.chat.id, call.message.message_id,
+                                  reply_markup=get_main_menu(is_admin(user_id)))
+            return
+        slot_key = d.get('slot_key')
+        if not slot_key:
+            database.clear_state(user_id)
+            bot.answer_callback_query(call.id, "Время не выбрано. Начните заново.", show_alert=True)
+            bot.edit_message_text("⚠️ Не выбран слот времени. Начните заново.",
+                                  call.message.chat.id, call.message.message_id,
+                                  reply_markup=get_main_menu(is_admin(user_id)))
+            return
+        booking_id = create_booking_with_slot(
+            user_id, d['service_name'], d.get('description', ''), d['date_time'], slot_key)
+        if booking_id is None:
+            database.clear_state(user_id)
+            bot.answer_callback_query(call.id, "Это время только что заняли! Выберите другое.", show_alert=True)
+            bot.edit_message_text("⏰ <b>Слот занят</b>\n\nЭто время только что забронировали. Выберите другое:",
+                                  call.message.chat.id, call.message.message_id,
+                                  reply_markup=get_main_menu(is_admin(user_id)))
+            return
         database.clear_state(user_id)
         text = (f"🎉 <b>Запись создана!</b>\n\nНомер: #{booking_id}\n📝 {d['service_name']}\n📅 {d['date_time']}\n\n📞 Мастер свяжется с вами. Приходите за 15 мин до записи!")
         bot.edit_message_text(text, call.message.chat.id, call.message.message_id,
@@ -481,6 +480,21 @@ def register_callbacks(bot, user_commands, rate_limit_window, rate_limit_count, 
         u = call.from_user
         notify_admin(f"🔔 <b>Новая запись #{booking_id}!</b>\n\n👤 @{u.username or 'без ника'} ({u.full_name})\n📝 {d['service_name']}\n💡 {d.get('description', '')}\n📅 {d['date_time']}")
         threading.Thread(target=refresh_overlay_async, daemon=True).start()
+
+    def cancel_booking_confirm(call):
+        """Клиент отменяет запись на этапе подтверждения.
+        Заявка фиксируется у мастера со статусом cancelled (попадает в «отменённые»),
+        клиент возвращается в главное меню. Слот НЕ блокируется."""
+        user_id = call.from_user.id
+        d = get_state_data(user_id)
+        if d.get('service_name') and d.get('date_time'):
+            create_booking(user_id, d['service_name'], d.get('description', ''),
+                           d['date_time'], status='cancelled')
+            threading.Thread(target=refresh_overlay_async, daemon=True).start()
+        database.clear_state(user_id)
+        bot.edit_message_text("❌ Запись отменена.",
+                              call.message.chat.id, call.message.message_id,
+                              reply_markup=get_main_menu(is_admin(user_id)))
 
     def admin_show_bookings(call):
         if not is_admin(call.from_user.id):
@@ -502,10 +516,7 @@ def register_callbacks(bot, user_commands, rate_limit_window, rate_limit_count, 
             return
         user = get_user_by_id(b['user_id'])
         uname = f"@{user['username']}" if user and user['username'] else f"ID:{b['user_id']}"
-        status_map = {'pending': '⏳ Ожидает', 'confirmed': '✅ Подтверждена',
-                      'cancelled': '❌ Отменена', 'completed': '✨ Завершена',
-                      'client_cancelled': '🚫 ОТКАЗ КЛИЕНТА'}
-        status_line = status_map.get(b['status'], '⚠️')
+        status_line = BOOKING_STATUS_RU.get(b['status'], '⚠️')
         if b['status'] == 'client_cancelled':
             status_line += " — ждёт отмены мастером"
         text = (f"🎫 <b>Запись #{b['id']}</b>\n\n👤 {uname} ({user['first_name'] if user else ''})\n📝 {b['service']}\n💡 {b['description']}\n📅 {b['date_time']}\nСтатус: {status_line}")

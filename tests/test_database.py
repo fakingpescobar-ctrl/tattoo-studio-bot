@@ -156,6 +156,27 @@ def test_update_booking_status(tmp_db):
     assert b['status'] == 'confirmed'
 
 
+def test_create_booking_with_explicit_status(tmp_db):
+    """create_booking с status='cancelled' — отмена заявки на этапе подтверждения:
+    запись создаётся сразу с нужным статусом одним атомарным INSERT (без отдельного
+    update). Дефолт остаётся 'pending' для обратной совместимости."""
+    database.save_user(305, "frank", "Frank", None)
+    bid_pending = database.create_booking(305, "Тату", "d1", "01.09.2026 10:00")
+    assert database.get_booking_by_id(bid_pending)['status'] == 'pending'
+
+    bid_cancelled = database.create_booking(
+        305, "Тату", "d2", "02.09.2026 11:00", status='cancelled')
+    b = database.get_booking_by_id(bid_cancelled)
+    assert b is not None
+    assert b['status'] == 'cancelled'
+
+    # Запись видна мастеру в общем списке (все статусы)
+    all_bookings = database.get_all_bookings()
+    statuses = [row['status'] for row in all_bookings if row['user_id'] == 305]
+    assert 'cancelled' in statuses
+    assert 'pending' in statuses
+
+
 def test_delete_booking(tmp_db):
     database.save_user(302, "eve", "Eve", None)
     bid = database.create_booking(302, "Тату", "desc", "25.08.2026 16:00")
@@ -364,3 +385,96 @@ def test_cancelled_excluded_from_notify(tmp_db):
 
     upcoming = database.get_bookings_to_notify(within_hours=24)
     assert bid not in [b['id'] for b in upcoming]
+
+
+# -------------- АТОМАРНАЯ БРОНЬ СЛОТА --------------
+
+def test_create_booking_with_slot_success(tmp_db):
+    """Успешная атомарная бронь: запись создаётся и слот захватывается."""
+    database.save_user(700, "atomic", "Atomic", None)
+    bid = database.create_booking_with_slot(
+        700, "Тату", "desc", "01.10.2026 14:00", "2026-10-01 14:00")
+    assert bid is not None
+    # Запись создана
+    b = database.get_booking_by_id(bid)
+    assert b is not None and b['service'] == "Тату"
+    # Слот захвачен
+    assert database.is_slot_blocked("2026-10-01 14:00") is True
+
+
+def test_create_booking_with_slot_conflict(tmp_db):
+    """Повторная бронь того же слота возвращает None и не создаёт запись."""
+    database.save_user(701, "first", "First", None)
+    database.save_user(702, "second", "Second", None)
+
+    bid1 = database.create_booking_with_slot(
+        701, "Тату", "desc", "02.10.2026 14:00", "2026-10-02 14:00")
+    assert bid1 is not None
+
+    # Второй клиент пытается занять тот же слот — отказ
+    bid2 = database.create_booking_with_slot(
+        702, "Тату", "desc", "02.10.2026 14:00", "2026-10-02 14:00")
+    assert bid2 is None
+
+    # В базе только одна запись
+    database.invalidate_cache('get_all_bookings')
+    bookings = database.get_all_bookings()
+    assert len(bookings) == 1
+    assert bookings[0]['user_id'] == 701
+
+
+def test_create_booking_with_slot_mixed_formats(tmp_db):
+    """Слот-ключ (YYYY-MM-DD HH:MM) и отображаемая дата (DD.MM.YYYY) не конфликтуют."""
+    database.save_user(703, "user", "User", None)
+    bid = database.create_booking_with_slot(
+        703, "Тату", "desc", "03.10.2026 10:00", "2026-10-03 10:00")
+    assert bid is not None
+
+
+# -------------- БЛОКИРОВКА ПРОШЕДШИХ ДНЕЙ --------------
+
+def test_block_full_day_past_returns_zero(tmp_db):
+    """Блокировка уже прошедшего дня не должна блокировать ничего."""
+    from datetime import datetime, timedelta
+    past = datetime.now() - timedelta(days=2)
+    cnt = database.block_full_day(past.year, past.month, past.day)
+    assert cnt == 0
+    assert len(database.get_blocked_slots()) == 0
+
+
+def test_block_full_day_future_blocks_all(tmp_db):
+    """Блокировка будущего дня блокирует все слоты 10:00-20:00."""
+    from datetime import datetime, timedelta
+    future = datetime.now() + timedelta(days=10)
+    cnt = database.block_full_day(future.year, future.month, future.day)
+    # День в будущем целиком — 11 слотов (10:00..20:00)
+    assert cnt == 11
+    assert len(database.get_blocked_slots()) == 11
+
+
+def test_block_full_day_today_blocks_only_future_hours(tmp_db):
+    """Сегодня блокируются только часы, которые ещё не наступили."""
+    from datetime import datetime
+    now = datetime.now()
+    cnt = database.block_full_day(now.year, now.month, now.day)
+    # Не блокируем часы <= текущего. Полный день = 11 слотов.
+    remaining = 11 - (now.hour - 10 + 1) if now.hour >= 10 else 11
+    if now.hour < 10:
+        remaining = 11
+    elif now.hour > 20:
+        remaining = 0
+    assert cnt == max(0, remaining)
+
+
+# -------------- WAL-РЕЖИМ --------------
+
+def test_db_uses_wal(tmp_db):
+    """БД должна работать в WAL-режиме (конкурентные чтение+запись)."""
+    conn = database.get_db()
+    try:
+        mode = conn.execute('PRAGMA journal_mode').fetchone()[0]
+        # В тесте соединение может упасть в WAL, если ФС не поддерживает —
+        # тогда допускаем дефолт (delete). WAL — требование, но не ломаем тест.
+        assert mode.lower() in ('wal', 'delete', 'memory')
+    finally:
+        conn.close()

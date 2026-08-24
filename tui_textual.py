@@ -12,6 +12,7 @@ import os
 import time
 from datetime import datetime
 
+from rich.text import Text
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
@@ -287,21 +288,30 @@ class PrizmaTUI(App):
         self.set_interval(0.15, self._animate_logo)
 
     def _animate_logo(self) -> None:
-        """Переливающийся градиент для логотипа (cyan→purple→pink→cyan)."""
+        """Цветовая волна слева направо по символам логотипа."""
         import math
         phase = self._logo_phase
         labels = getattr(self, '_logo_labels', [])
-        n = max(1, len(labels))
+
+        # Длина самой широкой строки — для расчёта ширины волны
+        max_w = max(len(line) for line in self._logo_text) if self._logo_text else 1
+
         for i, lbl in enumerate(labels):
-            # Смещение фазы по строкам + общий сдвиг по времени
-            t = (math.sin(phase + i * 0.3) + 1) / 2  # 0..1
-            # Градиент: фиолетовый (157,23,221) ←→ голубой (64,224,240)
-            r = int(64 + (157 - 64) * t)
-            g = int(80 + (23 - 80) * t)
-            b = int(200 + (221 - 200) * t)
-            color = f'#{r:02x}{g:02x}{b:02x}'
-            lbl.styles.color = color
-        self._logo_phase += 0.15
+            line = self._logo_text[i] if i < len(self._logo_text) else ''
+            text = Text()
+            for col, char in enumerate(line):
+                # Волна: sin(time + col * 0.4) — движется слева направо
+                wave = (math.sin(phase + col * 0.4) + 1) / 2  # 0..1
+                # Пик волны — ярко-голубой #64e0ff, впадина — фиолетовый #9d4edd
+                r = int(0x9d + (0x64 - 0x9d) * wave)
+                g = int(0x4e + (0xe0 - 0x4e) * wave)
+                b = int(0xdd + (0xff - 0xdd) * wave)
+                color = f'#{r:02x}{g:02x}{b:02x}'
+                # Жирный на пике волны, обычный в впадине
+                style = color + ' bold' if wave > 0.7 else color
+                text.append(char, style=style)
+            lbl.update(text)
+        self._logo_phase += 0.25
 
     def watch_uptime(self, val: str) -> None:
         label = self.query_one('#uptime-label', Label)

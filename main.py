@@ -11,7 +11,7 @@ import telebot
 from telebot import types
 from telebot.apihelper import ApiException
 
-from config import BOT_TOKEN, ADMIN_ID
+from config import BOT_TOKEN, ADMIN_ID, BOT_ADDRESS
 from collections import defaultdict
 from database import *
 from keyboards import *
@@ -120,7 +120,7 @@ if __name__ == "__main__":
                         msg = (f"🔔 <b>Напоминание о записи!</b>\n\n"
                                f"📝 {b['service']}\n"
                                f"📅 {when}\n\n"
-                               f"📍 г. Асбест, ул. Заводская, 4\n"
+                               f"📍 {BOT_ADDRESS}\n"
                                f"Пожалуйста, приходите за 15 минут до сеанса! 💛")
                         bot.send_message(b['user_id'], msg)
                         mark_booking_notified(b['id'])

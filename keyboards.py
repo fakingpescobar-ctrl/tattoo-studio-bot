@@ -2,6 +2,9 @@ import calendar
 from datetime import datetime
 from telebot import types
 
+from common import (ACTIVE_BOOKING_STATUSES, BOOKING_STATUS_SHORT,
+                    MONTHS_RU, WEEKDAYS_RU, price_short)
+
 # ============ ГЛАВНОЕ МЕНЮ ============
 
 def get_main_menu(is_admin=False):
@@ -28,16 +31,8 @@ def get_back_keyboard():
 def get_services_keyboard(services):
     markup = types.InlineKeyboardMarkup()
     for s in services:
-        pmin = int(s['price_min'])
-        pmax = int(s['price_max'])
-        if pmin == 0 and pmax == 0:
-            price_str = "договорная"
-        elif pmin == pmax:
-            price_str = f"{pmin}₽"
-        else:
-            price_str = f"от {pmin}₽"
         markup.add(types.InlineKeyboardButton(
-            text=f"{s['name']} — {price_str}",
+            text=f"{s['name']} — {price_short(s['price_min'], s['price_max'])}",
             callback_data=f"service_{s['id']}"
         ))
     markup.add(types.InlineKeyboardButton("◀️ В меню", callback_data="menu"))
@@ -52,10 +47,6 @@ def get_confirmation_keyboard():
     return markup
 
 # ============ КАЛЕНДАРЬ ============
-
-MONTHS_RU = ["", "Январь", "Февраль", "Март", "Апрель", "Май", "Июнь",
-             "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь"]
-WEEKDAYS_RU = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"]
 
 def _ign():
     return types.InlineKeyboardButton(text=" ", callback_data="ignore")
@@ -190,8 +181,9 @@ def get_admin_time_keyboard(year, month, day, blocked_slots=None):
 
 def get_about_keyboard():
     """Кнопки контактов в разделе О мастере"""
+    from config import BOT_VK_LABEL, BOT_VK_URL
     markup = types.InlineKeyboardMarkup()
-    markup.add(types.InlineKeyboardButton("🌐 ВКонтакте", url="https://vk.ru/id880400434"))
+    markup.add(types.InlineKeyboardButton(f"🌐 {BOT_VK_LABEL}", url=BOT_VK_URL))
     markup.add(types.InlineKeyboardButton("◀️ В меню", callback_data="menu"))
     return markup
 
@@ -227,7 +219,7 @@ def get_my_bookings_keyboard(bookings):
     """Кнопки отмены для активных записей клиента (pending/confirmed)"""
     markup = types.InlineKeyboardMarkup()
     for b in bookings:
-        if b['status'] in ('pending', 'confirmed'):
+        if b['status'] in ACTIVE_BOOKING_STATUSES:
             markup.add(types.InlineKeyboardButton(
                 f"❌ Отменить запись #{b['id']}",
                 callback_data=f"my_cancel_{b['id']}"))
@@ -245,11 +237,9 @@ def get_confirm_cancel_keyboard(booking_id):
 
 def get_admin_bookings_keyboard(bookings):
     markup = types.InlineKeyboardMarkup()
-    status_map = {'pending': '⏳', 'confirmed': '✅', 'cancelled': '❌',
-                  'client_cancelled': '🚫', 'completed': '✨'}
     for b in bookings[:10]:
         markup.add(types.InlineKeyboardButton(
-            text=f"{status_map.get(b['status'], '⚠️')} #{b['id']} — {b['date_time'][:16]}",
+            text=f"{BOOKING_STATUS_SHORT.get(b['status'], '⚠️')} #{b['id']} — {b['date_time'][:16]}",
             callback_data=f"admin_booking_{b['id']}"))
     markup.add(types.InlineKeyboardButton("◀️ В админку", callback_data="admin"))
     return markup
