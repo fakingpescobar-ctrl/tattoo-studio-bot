@@ -5,6 +5,10 @@ import time
 
 
 from config import DB_PATH
+from common import booking_to_slot_key
+
+# Статусы, при которых слот считается свободным (блокировка снимается)
+_CANCELLED_STATUSES = ('cancelled', 'client_cancelled')
 
 
 def get_db():
@@ -339,26 +343,64 @@ def get_all_bookings():
     )
 
 def update_booking_status(booking_id, status):
+    """Смена статуса. Переход в отмену освобождает слот, возврат из отмены —
+    захватывает снова (если слот не перехватил другой клиент)."""
     conn = get_db()
-    conn.execute('UPDATE bookings SET status = ? WHERE id = ?', (status, booking_id))
-    conn.commit()
-    conn.close()
+    try:
+        conn.execute('BEGIN IMMEDIATE')
+        row = conn.execute('SELECT date_time, status FROM bookings WHERE id = ?',
+                           (booking_id,)).fetchone()
+        if row is None:
+            conn.rollback()
+            return
+        was_cancelled = row['status'] in _CANCELLED_STATUSES
+        now_cancelled = status in _CANCELLED_STATUSES
+        conn.execute('UPDATE bookings SET status = ? WHERE id = ?', (status, booking_id))
+        slot = booking_to_slot_key(row['date_time'])
+        if slot and not was_cancelled and now_cancelled:
+            # Отмена: слот снова свободен для других клиентов
+            conn.execute('DELETE FROM blocked_slots WHERE date_time = ?', (slot,))
+        elif slot and was_cancelled and not now_cancelled:
+            # Возврат из отмены: пробуем захватить (мог перехватить другой)
+            conn.execute('INSERT OR IGNORE INTO blocked_slots (date_time) VALUES (?)', (slot,))
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
     invalidate_cache('get_all_bookings', 'get_user_bookings')
     _bump_epoch()
 
 def delete_booking(booking_id):
-    """Полностью удаляет запись из БД.
+    """Полностью удаляет запись из БД вместе с захватом её слота
+    (иначе удалённая бронь оставляет слот заблокированным навсегда).
     После удаления прижимает счётчик AUTOINCREMENT к MAX(id),
     чтобы следующая запись получила следующий по порядку номер
     (без 'дыр' вроде #7 при пустой таблице)."""
     conn = get_db()
-    conn.execute('DELETE FROM bookings WHERE id = ?', (booking_id,))
-    # Прижимаем sqlite_sequence к реальному максимуму
-    max_id = conn.execute('SELECT COALESCE(MAX(id), 0) FROM bookings').fetchone()[0]
-    conn.execute("UPDATE sqlite_sequence SET seq = ? WHERE name = 'bookings'", (max_id,))
-    conn.commit()
-    conn.close()
+    try:
+        conn.execute('BEGIN IMMEDIATE')
+        row = conn.execute('SELECT date_time FROM bookings WHERE id = ?',
+                           (booking_id,)).fetchone()
+        if row is None:
+            conn.rollback()
+            return
+        conn.execute('DELETE FROM bookings WHERE id = ?', (booking_id,))
+        slot = booking_to_slot_key(row['date_time'])
+        if slot:
+            conn.execute('DELETE FROM blocked_slots WHERE date_time = ?', (slot,))
+        # Прижимаем sqlite_sequence к реальному максимуму
+        max_id = conn.execute('SELECT COALESCE(MAX(id), 0) FROM bookings').fetchone()[0]
+        conn.execute("UPDATE sqlite_sequence SET seq = ? WHERE name = 'bookings'", (max_id,))
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
     invalidate_cache('get_all_bookings', 'get_user_bookings')
+    _bump_epoch()
     _bump_epoch()
 
 def get_booking_by_id(booking_id):
