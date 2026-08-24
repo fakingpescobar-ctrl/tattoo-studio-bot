@@ -1,0 +1,22 @@
+{
+  "name": "prizma-admin",
+  "version": "1.0.0",
+  "description": "PRIZMA tattoo studio - admin console (Electron + React)",
+  "private": true,
+  "main": "electron/main.cjs",
+  "scripts": {
+    "dev:vite": "vite",
+    "dev": "node dev.mjs",
+    "build": "vite build",
+    "start": "electron ."
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.3.4",
+    "electron": "^33.2.0",
+    "vite": "^6.0.0"
+  },
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  }
+}

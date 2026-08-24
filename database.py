@@ -103,10 +103,27 @@ def init_db():
         )
     ''')
 
+    # Эпоха кэша: единый счётчик для кросс-процессной инвалидации.
+    # Панель и боты живут в разных процессах — in-memory кэш каждого
+    # сверяет свою эпоху с этой строкой при каждом чтении (_cached_query).
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS cache_epoch (
+            id INTEGER PRIMARY KEY CHECK (id = 1),
+            value INTEGER NOT NULL DEFAULT 0
+        )
+    ''')
+
     # Миграции: добавляем колонку notified_24h в bookings, если её ещё нет
     # (для системы напоминаний о записях)
     try:
         cursor.execute('ALTER TABLE bookings ADD COLUMN notified_24h INTEGER DEFAULT 0')
+    except sqlite3.OperationalError:
+        pass  # колонка уже существует
+
+    # Миграции: колонка platform — какой платформой создана запись ('telegram'/'max').
+    # Нужна, чтобы боты не слали напоминания на чужие ID (TG-id не существует в MAX и наоборот).
+    try:
+        cursor.execute("ALTER TABLE bookings ADD COLUMN platform TEXT NOT NULL DEFAULT 'telegram'")
     except sqlite3.OperationalError:
         pass  # колонка уже существует
 
@@ -157,16 +174,45 @@ def invalidate_cache(*keys):
         if k.split(':')[0] in keys:
             cache.pop(k, None)
 
+def _db_epoch():
+    """Текущая эпоха кэша из БД (кросс-процессный счётчик записей).
+
+    None — таблицы ещё нет (старая БД до init_db): epoch-логика отключается.
+    """
+    try:
+        row = get_db().execute('SELECT value FROM cache_epoch WHERE id = 1').fetchone()
+        return row['value'] if row else 0
+    except sqlite3.Error:
+        return None
+
+def _bump_epoch():
+    """Сдвигает эпоху: все ЧУЖИЕ процессы увидят изменение и сбросят свой кэш.
+
+    Вызывается каждой пишущей функцией. Ошибки глушатся — инвалидация
+    не должна ломать основную операцию (TTL всё равно подстрахует).
+    """
+    try:
+        conn = get_db()
+        conn.execute(
+            'INSERT INTO cache_epoch (id, value) VALUES (1, 1) '
+            'ON CONFLICT(id) DO UPDATE SET value = value + 1')
+        conn.commit()
+        conn.close()
+    except sqlite3.Error:
+        pass
+
 def _is_cache_valid(timestamp, ttl=CACHE_TTL):
     return time.time() - timestamp < ttl
 
 def _cached_query(query_func, key, *args, ttl=CACHE_TTL):
-    if key in cache:
-        result, ts = cache[key]
-        if _is_cache_valid(ts, ttl):
+    epoch = _db_epoch()
+    entry = cache.get(key)
+    if entry is not None:
+        result, ts, cached_epoch = entry
+        if _is_cache_valid(ts, ttl) and (epoch is None or cached_epoch == epoch):
             return result
     result = query_func(*args)
-    cache[key] = (result, time.time())
+    cache[key] = (result, time.time(), epoch)
     return result
 
 # ============ ПОЛЬЗОВАТЕЛИ ============
@@ -210,6 +256,7 @@ def add_portfolio_work(title, description, file_id, style):
     ''', (title, description, file_id, style))
     conn.commit()
     invalidate_cache('get_portfolio')
+    _bump_epoch()
     conn.close()
 
 def delete_portfolio_work(work_id):
@@ -218,23 +265,26 @@ def delete_portfolio_work(work_id):
     conn.commit()
     conn.close()
     invalidate_cache('get_portfolio')
+    _bump_epoch()
 
 # ============ ЗАПИСИ ============
 
-def create_booking(user_id, service, description, date_time, status='pending'):
+def create_booking(user_id, service, description, date_time, status='pending', platform='telegram'):
     conn = get_db()
     cursor = conn.cursor()
     cursor.execute('''
-        INSERT INTO bookings (user_id, service, description, date_time, status)
-        VALUES (?, ?, ?, ?, ?)
-    ''', (user_id, service, description, date_time, status))
+        INSERT INTO bookings (user_id, service, description, date_time, status, platform)
+        VALUES (?, ?, ?, ?, ?, ?)
+    ''', (user_id, service, description, date_time, status, platform))
     conn.commit()
     booking_id = cursor.lastrowid
     conn.close()
     invalidate_cache('get_all_bookings')
+    _bump_epoch()
     return booking_id
 
-def create_booking_with_slot(user_id, service, description, date_time, slot_key):
+def create_booking_with_slot(user_id, service, description, date_time, slot_key,
+                             platform='telegram'):
     """Атомарная бронь: запись + захват слота в одной транзакции.
 
     Защита от гонки: если TG и MAX одновременно бронируют один слот,
@@ -249,9 +299,9 @@ def create_booking_with_slot(user_id, service, description, date_time, slot_key)
         cursor.execute(
             'INSERT INTO blocked_slots (date_time) VALUES (?)', (slot_key,))
         cursor.execute('''
-            INSERT INTO bookings (user_id, service, description, date_time)
-            VALUES (?, ?, ?, ?)
-        ''', (user_id, service, description, date_time))
+            INSERT INTO bookings (user_id, service, description, date_time, platform)
+            VALUES (?, ?, ?, ?, ?)
+        ''', (user_id, service, description, date_time, platform))
         booking_id = cursor.lastrowid
         conn.commit()
     except sqlite3.IntegrityError:
@@ -263,6 +313,7 @@ def create_booking_with_slot(user_id, service, description, date_time, slot_key)
     finally:
         conn.close()
     invalidate_cache('get_all_bookings')
+    _bump_epoch()
     return booking_id
 
 def get_user_bookings(user_id):
@@ -293,6 +344,7 @@ def update_booking_status(booking_id, status):
     conn.commit()
     conn.close()
     invalidate_cache('get_all_bookings', 'get_user_bookings')
+    _bump_epoch()
 
 def delete_booking(booking_id):
     """Полностью удаляет запись из БД.
@@ -307,6 +359,7 @@ def delete_booking(booking_id):
     conn.commit()
     conn.close()
     invalidate_cache('get_all_bookings', 'get_user_bookings')
+    _bump_epoch()
 
 def get_booking_by_id(booking_id):
     conn = get_db()
@@ -388,6 +441,7 @@ def add_review(user_id, username, rating, text):
     conn.commit()
     conn.close()
     invalidate_cache('get_reviews', 'get_rating_stats')
+    _bump_epoch()
 
 def get_reviews(limit=20):
     return _cached_query(
@@ -446,10 +500,14 @@ def clear_state(user_id):
 
 # ============ НАПОМИНАНИЯ ============
 
-def get_bookings_to_notify(within_hours=24):
+def get_bookings_to_notify(within_hours=24, platform=None):
     """Возвращает активные записи (pending/confirmed), до сеанса которых осталось
     не более `within_hours` часов и которые ещё не получили напоминание (notified_24h=0).
-    Формат date_time в БД: 'DD.MM.YYYY HH:MM'."""
+    Формат date_time в БД: 'DD.MM.YYYY HH:MM'.
+
+    platform ('telegram'/'max') — фильтр по платформе, создавшей запись:
+    user_id из другой платформы для этого бота не существует.
+    """
     from datetime import datetime as _dt, timedelta as _td
     conn = get_db()
     rows = conn.execute(
@@ -464,6 +522,8 @@ def get_bookings_to_notify(within_hours=24):
     now = _dt.now()
     result = []
     for r in rows:
+        if platform and r['platform'] and r['platform'] != platform:
+            continue  # запись чужой платформы — этот бот её не напоминает
         try:
             dt = _dt.strptime(r['date_time'].strip(), '%d.%m.%Y %H:%M')
         except (ValueError, TypeError, AttributeError):

@@ -15,7 +15,6 @@ from config import BOT_TOKEN, ADMIN_ID, BOT_ADDRESS
 from collections import defaultdict
 from database import *
 from keyboards import *
-from admin_panel import run_admin_panel, set_tg_active
 from logging.handlers import RotatingFileHandler
 
 # Настройка логирования — только в файл (консоль зарезервирована под оверлей)
@@ -69,36 +68,27 @@ if __name__ == "__main__":
     get_reviews()
     get_user_bookings(ADMIN_ID)
     logger.info("Cache warmed!")
-    # Админ-панель (tkinter GUI) в daemon-потоке.
-    # Fallback на консольный overlay если tkinter недоступен.
+    # Консольный оверлей (neofetch-баннер) + фоновый поток автообновления.
+    # Админка теперь — отдельное Electron-приложение (admin/), данные через admin_api.py.
     try:
-        import tkinter  # noqa: F401
-        gui_thread = threading.Thread(target=run_admin_panel, daemon=True)
-        gui_thread.start()
-        set_tg_active(True)
-        logger.info("Admin panel (tkinter) started in background thread")
-    except ImportError:
-        logger.warning("tkinter unavailable — falling back to console overlay")
-        try:
-            from overlay import show_overlay
-            show_overlay()
-        except Exception as e:
-            logger.error(f"Overlay error: {e}")
+        from overlay import show_overlay
+        show_overlay()
+    except Exception as e:
+        logger.error(f"Overlay error: {e}")
 
-    # Фоновый поток автообновления консольного оверлея (только если GUI не запущен)
-    if 'gui_thread' not in dir():
-        def overlay_refresh_loop():
-            time.sleep(10)
-            while True:
-                try:
-                    from overlay import refresh_overlay
-                    refresh_overlay()
-                except Exception as e:
-                    logger.error(f"Overlay refresh error: {e}")
-                time.sleep(30)
-        refresh_thread = threading.Thread(target=overlay_refresh_loop, daemon=True)
-        refresh_thread.start()
-        logger.info("Overlay auto-refresh started (every 30s)")
+    def overlay_refresh_loop():
+        time.sleep(10)
+        while True:
+            try:
+                from overlay import refresh_overlay
+                refresh_overlay()
+            except Exception as e:
+                logger.error(f"Overlay refresh error: {e}")
+            time.sleep(30)
+
+    refresh_thread = threading.Thread(target=overlay_refresh_loop, daemon=True)
+    refresh_thread.start()
+    logger.info("Overlay auto-refresh started (every 30s)")
 
     # Фоновый поток напоминаний о записях (проверяет каждые 10 минут)
     def reminders_loop():
@@ -109,7 +99,7 @@ if __name__ == "__main__":
             try:
                 now = datetime.now()
                 # 1. Напоминания клиентам: запись в течение 24ч и ещё не уведомлена
-                upcoming = get_bookings_to_notify(within_hours=24)
+                upcoming = get_bookings_to_notify(within_hours=24, platform='telegram')
                 for b in upcoming:
                     try:
                         dt = datetime.strptime(b['date_time'].strip(), '%d.%m.%Y %H:%M')
@@ -126,8 +116,8 @@ if __name__ == "__main__":
                         mark_booking_notified(b['id'])
                         logger.info(f"Reminder sent: booking #{b['id']} -> user {b['user_id']}")
                     except Exception as e:
+                        # Не помечаем notified при фейле — попробуем в следующем проходе
                         logger.error(f"Reminder error for booking #{b['id']}: {e}")
-                        mark_booking_notified(b['id'])  # не зацикливаемся на ошибке
 
                 # 2. Утренняя сводка админу о сегодняшних записях (один раз в день)
                 today_key = now.strftime('%Y-%m-%d')

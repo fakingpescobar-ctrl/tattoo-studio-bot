@@ -6,12 +6,40 @@
 import logging
 import threading
 import time
+from pathlib import Path
 
+import certifi
 import requests
 
 from config import MAX_TOKEN
 
 API_BASE = "https://platform-api2.max.ru"
+
+# Домен *.max.ru подписан цепочкой Минцифры (Russian Trusted Root CA), которой
+# нет в бандле certifi — без расширения любой запрос падает с
+# CERTIFICATE_VERIFY_FAILED. Корни лежат в certs/ и подмешиваются к certifi.
+_CERTS_DIR = Path(__file__).parent / "certs"
+
+
+def _ca_bundle_path():
+    """CA-бандл для requests: certifi + все certs/*.pem.
+
+    Возвращает путь к merged-бандлу (пересобирается при изменении исходников)
+    или True, если в certs/ нет дополнительных корней.
+    """
+    extra = sorted(p for p in _CERTS_DIR.glob("*.pem") if not p.name.startswith("_"))
+    if not extra:
+        return True
+    bundle_path = _CERTS_DIR / "_bundle.pem"
+    merged = Path(certifi.where()).read_text(encoding="utf-8")
+    for pem in extra:
+        merged += "\n" + pem.read_text(encoding="utf-8")
+    if not bundle_path.exists() or bundle_path.read_text(encoding="utf-8") != merged:
+        bundle_path.write_text(merged, encoding="utf-8")
+    return str(bundle_path)
+
+
+CA_BUNDLE = _ca_bundle_path()
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +57,7 @@ class MaxClient:
         self.token = token
         self.base = base.rstrip('/')
         self.session = requests.Session()
+        self.session.verify = CA_BUNDLE
         self.session.headers.update({
             'Authorization': token,
             'Content-Type': 'application/json',
@@ -146,7 +175,7 @@ class MaxClient:
         if token:
             return token
         with open(file_path, 'rb') as f:
-            resp = requests.post(url, files={'data': f}, timeout=120)
+            resp = requests.post(url, files={'data': f}, timeout=120, verify=CA_BUNDLE)
         if resp.status_code >= 400:
             raise MaxApiError(f"Upload failed HTTP {resp.status_code}: {resp.text[:200]}")
         data = resp.json()

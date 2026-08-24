@@ -45,6 +45,7 @@ def tmp_db(monkeypatch):
             status TEXT DEFAULT 'pending',
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             notified_24h INTEGER DEFAULT 0,
+            platform TEXT NOT NULL DEFAULT 'telegram',
             FOREIGN KEY (user_id) REFERENCES users(id)
         );
         CREATE TABLE services (
@@ -80,6 +81,10 @@ def tmp_db(monkeypatch):
             state TEXT,
             data TEXT,
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE TABLE cache_epoch (
+            id INTEGER PRIMARY KEY CHECK (id = 1),
+            value INTEGER NOT NULL DEFAULT 0
         );
     ''')
     conn.commit()
@@ -385,6 +390,53 @@ def test_cancelled_excluded_from_notify(tmp_db):
 
     upcoming = database.get_bookings_to_notify(within_hours=24)
     assert bid not in [b['id'] for b in upcoming]
+
+
+def test_notify_platform_filter(tmp_db):
+    """Напоминания фильтруются по платформе: TG-бот не должен видеть MAX-записи и наоборот."""
+    from datetime import datetime, timedelta
+    soon = (datetime.now() + timedelta(hours=2)).strftime('%d.%m.%Y %H:%M')
+    database.save_user(701, "tguser", "Tg", None)
+    database.save_user(702, "maxuser", "Max", None)
+    tg_bid = database.create_booking(701, "Тату", "desc", soon)  # default platform='telegram'
+    max_bid = database.create_booking(702, "Тату", "desc", soon, platform='max')
+
+    tg_view = [b['id'] for b in database.get_bookings_to_notify(within_hours=24, platform='telegram')]
+    max_view = [b['id'] for b in database.get_bookings_to_notify(within_hours=24, platform='max')]
+    all_view = [b['id'] for b in database.get_bookings_to_notify(within_hours=24)]
+
+    assert tg_bid in tg_view and max_bid not in tg_view
+    assert max_bid in max_view and tg_bid not in max_view
+    # Без фильтра видны обе (старое поведение сохранено)
+    assert tg_bid in all_view and max_bid in all_view
+
+
+def test_cache_epoch_cross_process_invalidation(tmp_db):
+    """Запись сдвигает эпоху в БД → чужой процесс с протухшим кэшем видит свежие данные.
+
+    Эмуляция: наполняем кэш «отравленным» значением со старой эпохой,
+    пишем через create_booking (bump), проверяем что _cached_query не вернёт яд.
+    """
+    database.save_user(801, "epoch", "Epoch", None)
+
+    # Прогрев: реальное значение попадает в кэш
+    fresh = database.get_all_bookings()
+    assert all(b['user_id'] != 801 for b in fresh)
+
+    # Отравляем кэш: то же имя ключа, старая эпоха, бесконечный TTL
+    key = database._get_cache_key('get_all_bookings')
+    poison = [ {'id': 999, 'user_id': 801, 'service': 'POISON'} ]
+    epoch_before = database._db_epoch()
+    database.cache[key] = (poison, database.time.time() + 10_000, epoch_before)
+
+    # Пишущая операция из «другого процесса» сдвигает эпоху
+    database.create_booking(801, "Тату", "desc", "01.10.2026 14:00")
+    assert database._db_epoch() == epoch_before + 1
+
+    # Кэш с устаревшей эпохой игнорируется — возвращаются реальные данные
+    result = database.get_all_bookings()
+    assert all(b['service'] != 'POISON' for b in result)
+    assert any(b['user_id'] == 801 for b in result)
 
 
 # -------------- АТОМАРНАЯ БРОНЬ СЛОТА --------------

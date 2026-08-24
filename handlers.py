@@ -465,7 +465,8 @@ def register_callbacks(bot, user_commands, rate_limit_window, rate_limit_count, 
                                   reply_markup=get_main_menu(is_admin(user_id)))
             return
         booking_id = create_booking_with_slot(
-            user_id, d['service_name'], d.get('description', ''), d['date_time'], slot_key)
+            user_id, d['service_name'], d.get('description', ''), d['date_time'], slot_key,
+            platform='telegram')
         if booking_id is None:
             database.clear_state(user_id)
             bot.answer_callback_query(call.id, "Это время только что заняли! Выберите другое.", show_alert=True)
@@ -489,7 +490,7 @@ def register_callbacks(bot, user_commands, rate_limit_window, rate_limit_count, 
         d = get_state_data(user_id)
         if d.get('service_name') and d.get('date_time'):
             create_booking(user_id, d['service_name'], d.get('description', ''),
-                           d['date_time'], status='cancelled')
+                           d['date_time'], status='cancelled', platform='telegram')
             threading.Thread(target=refresh_overlay_async, daemon=True).start()
         database.clear_state(user_id)
         bot.edit_message_text("❌ Запись отменена.",

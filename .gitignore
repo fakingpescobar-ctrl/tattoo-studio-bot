@@ -2,6 +2,17 @@
 .env
 config.json
 
+# Локальный API-токен админки (генерируется admin_api.py)
+.api-token
+
+# Electron/админка
+admin/node_modules/
+admin/dist/
+admin/.vite/
+
+# Сгенерированный CA-бандл (certifi + certs/*.pem)
+certs/_bundle.pem
+
 # База данных
 *.db
 *.db-journal
@@ -39,3 +50,6 @@ ENV/
 Thumbs.db
 Desktop.ini
 .DS_Store
+
+# Кэш фото портфолио админки
+_img_cache/

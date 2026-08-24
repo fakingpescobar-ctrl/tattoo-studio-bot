@@ -96,11 +96,16 @@ class MaxBot:
     # ---------- точка входа ----------
 
     def handle_update(self, update):
-        """Диспечер по типу события. update — объект Update из API MAX."""
+        """Диспечер по типу события. update — объект Update из API MAX.
+
+        ВАЖНО: chat_id из апдейта — внутренний id диалога MAX, API НЕ принимает
+        его как адресат (POST /messages?user_id=... отвечает Unknown recipient /
+        Dialog not found). Для личных диалогов бота адресат — всегда user_id.
+        """
         utype = update.get('update_type')
         user = update.get('user') or {}
         user_id = user.get('user_id')
-        chat_id = update.get('chat_id') or user_id
+        chat_id = user_id or update.get('chat_id')
 
         try:
             if utype == 'message_callback':
@@ -123,6 +128,7 @@ class MaxBot:
         text = body.get('text') or ''
         if not user_id:
             user_id = (message.get('sender') or {}).get('user_id')
+            chat_id = user_id  # адресат всегда user_id (см. докстринг handle_update)
         user = update.get('user') or (message.get('sender') or {})
 
         # Контакт (кнопка request_contact / поделиться номером)
@@ -562,7 +568,8 @@ class MaxBot:
                                        attachments=get_main_menu(is_admin(user_id)))
             return
         booking_id = create_booking_with_slot(
-            user_id, d['service_name'], d.get('description', ''), d['date_time'], d['slot_key'])
+            user_id, d['service_name'], d.get('description', ''), d['date_time'], d['slot_key'],
+            platform='max')
         if booking_id is None:
             clear_state(user_id)
             self.client.callback_reply(callback_id,
@@ -584,7 +591,7 @@ class MaxBot:
         d = get_state_data(user_id)
         if d.get('service_name') and d.get('date_time'):
             create_booking(user_id, d['service_name'], d.get('description', ''),
-                           d['date_time'], status='cancelled')
+                           d['date_time'], status='cancelled', platform='max')
             threading.Thread(target=refresh_overlay_async, daemon=True).start()
         clear_state(user_id)
         self.client.callback_reply(callback_id,

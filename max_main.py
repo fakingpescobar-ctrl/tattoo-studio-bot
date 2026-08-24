@@ -54,18 +54,13 @@ def main():
         me = client.get_me()
         logger.info(f"Connected as: {me.get('name') or me.get('username') or '?'} (id={me.get('user_id')})")
         print(f"[OK] MAX-бот подключён: {me.get('name') or me.get('username') or '?'}")
-        # Сообщаем админ-панели что MAX-бот активен
-        try:
-            from admin_panel import set_max_active
-            set_max_active(True)
-        except Exception:
-            pass  # панель может быть не запущена
     except MaxApiError as e:
         logger.error(f"Auth check failed: {e}")
         print(f"[ERROR] Не удалось подключиться к MAX API: {e}")
         return
 
     try:
+        from overlay import show_overlay
         show_overlay()
     except Exception as e:
         logger.error(f"Overlay error: {e}")
@@ -90,7 +85,7 @@ def main():
         while True:
             try:
                 now = datetime.now()
-                upcoming = get_bookings_to_notify(within_hours=24)
+                upcoming = get_bookings_to_notify(within_hours=24, platform='max')
                 for b in upcoming:
                     try:
                         dt = datetime.strptime(b['date_time'].strip(), '%d.%m.%Y %H:%M')
@@ -107,8 +102,8 @@ def main():
                         mark_booking_notified(b['id'])
                         logger.info(f"MAX reminder sent: booking #{b['id']} -> user {b['user_id']}")
                     except Exception as e:
+                        # Не помечаем notified при фейле — попробуем в следующем проходе
                         logger.error(f"MAX reminder error for booking #{b['id']}: {e}")
-                        mark_booking_notified(b['id'])
 
                 today_key = now.strftime('%Y-%m-%d')
                 if last_today_summary != today_key and 8 <= now.hour < 12:
