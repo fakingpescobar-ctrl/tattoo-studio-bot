@@ -33,6 +33,15 @@ _overlay_lock = threading.Lock()
 # Момент старта бота (для расчёта uptime)
 _started_at = time.monotonic()
 
+# Платформа процесса: 'telegram' | 'max'. max_main.py вызывает set_platform('max')
+# ДО show_overlay() — иначе оба окна рисуют одинаковый TG-баннер (общий overlay.py).
+_PLATFORM = 'telegram'
+
+
+def set_platform(p):
+    global _PLATFORM
+    _PLATFORM = 'max' if p == 'max' else 'telegram'
+
 
 # ============ ЦВЕТА ============
 
@@ -57,11 +66,16 @@ def _rgb(r, g, b):
 
 
 def _gradient_color(t):
-    """Градиент cyan (0) → magenta (1). t ∈ [0, 1]."""
+    """Градиент по платформе: TG — cyan→magenta, MAX — оранжевый→фиолетовый (бренд PRIZMA)."""
     t = max(0.0, min(1.0, t))
-    r = int( 64 + (220 -  64) * t)
-    g = int(224 + ( 80 - 224) * t)
-    b = int(240 + (200 - 240) * t)
+    if _PLATFORM == 'max':
+        r = int(255 + (157 - 255) * t)
+        g = int(140 + ( 78 - 140) * t)
+        b = int( 66 + (221 -  66) * t)
+    else:
+        r = int( 64 + (220 -  64) * t)
+        g = int(224 + ( 80 - 224) * t)
+        b = int(240 + (200 - 240) * t)
     return _rgb(r, g, b)
 
 
@@ -228,25 +242,38 @@ def _system_lines():
     lines.append(_kv("ОС", "Windows", C.Y))
     lines.append(_kv("Py", ver, C.Y))
 
-    try:
-        import importlib.metadata
-        tbot_ver = importlib.metadata.version('pytelegrambotapi')
-        lines.append(_kv("API", f"telebot v{tbot_ver}", C.Y))
-    except Exception:
-        lines.append(_kv("API", "telebot (?)", C.Y))
-
-    from config import BOT_TOKEN, ADMIN_IDS
-    if BOT_TOKEN and BOT_TOKEN != 'YOUR_TELEGRAM_BOT_TOKEN_HERE':
-        lines.append(_kv("Токен", f"✓ {BOT_TOKEN[:6]}…", C.G))
+    if _PLATFORM == 'max':
+        from config import MAX_TOKEN, MAX_ADMIN_IDS
+        lines.append(_kv("API", "MAX Bot API", C.Y))
+        if MAX_TOKEN:
+            lines.append(_kv("Токен", f"✓ {MAX_TOKEN[:6]}…", C.G))
+        else:
+            lines.append(_kv("Токен", "✗ нет!", C.R))
+        if MAX_ADMIN_IDS:
+            label = "Админ" if len(MAX_ADMIN_IDS) == 1 else "Админы"
+            lines.append(_kv(label, f"✓ {', '.join(str(i) for i in MAX_ADMIN_IDS)}", C.G))
+        else:
+            lines.append(_kv("Админ", "—", C.Y))
     else:
-        lines.append(_kv("Токен", "✗ нет!", C.R))
+        try:
+            import importlib.metadata
+            tbot_ver = importlib.metadata.version('pytelegrambotapi')
+            lines.append(_kv("API", f"telebot v{tbot_ver}", C.Y))
+        except Exception:
+            lines.append(_kv("API", "telebot (?)", C.Y))
 
-    if ADMIN_IDS:
-        ids = ", ".join(str(i) for i in ADMIN_IDS)
-        label = "Админ" if len(ADMIN_IDS) == 1 else "Админы"
-        lines.append(_kv(label, f"✓ {ids}", C.G))
-    else:
-        lines.append(_kv("Админ", "—", C.Y))
+        from config import BOT_TOKEN, ADMIN_IDS
+        if BOT_TOKEN and BOT_TOKEN != 'YOUR_TELEGRAM_BOT_TOKEN_HERE':
+            lines.append(_kv("Токен", f"✓ {BOT_TOKEN[:6]}…", C.G))
+        else:
+            lines.append(_kv("Токен", "✗ нет!", C.R))
+
+        if ADMIN_IDS:
+            ids = ", ".join(str(i) for i in ADMIN_IDS)
+            label = "Админ" if len(ADMIN_IDS) == 1 else "Админы"
+            lines.append(_kv(label, f"✓ {ids}", C.G))
+        else:
+            lines.append(_kv("Админ", "—", C.Y))
 
     if os.path.exists(DB_PATH):
         size = os.path.getsize(DB_PATH)
@@ -333,11 +360,17 @@ def build_info_lines():
     lines = []
     bookings = get_all_bookings()
 
-    # Шапка: БОТ @ handle + город
+    # Шапка: имя студии + мастер; handle — по платформе процесса
+    if _PLATFORM == 'max':
+        from config import MAX_BOT_HANDLE
+        handle = f"@{MAX_BOT_HANDLE}  ·  MAX"
+    else:
+        handle = f"@{BOT_HANDLE}  ·  Telegram"
+
     lines.append(f"{C.BOLD}{C.CY}{BOT_NAME}{C.RST}"
                  f" {C.DIM}·{C.RST} "
                  f"{C.W}{BOT_MASTER}{C.RST}")
-    lines.append(f"{C.DIM}@{BOT_HANDLE}{C.RST}")
+    lines.append(f"{C.DIM}{handle}{C.RST}")
     lines.append(_hr())
     lines.append(f"{C.DIM}📍 {BOT_CITY}{C.RST}")
 

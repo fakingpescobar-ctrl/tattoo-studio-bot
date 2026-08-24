@@ -63,7 +63,9 @@ def get_confirmation_keyboard():
 # ============ КАЛЕНДАРЬ ============
 
 def _ign():
-    return _cb(" ", "ignore")
+    # НЕ пробел: MAX триммит text и отвечает 400 errors.required на пустую
+    # кнопку (весь календарь не отправлялся именно из-за этого). Точка ок.
+    return _cb("·", "ignore")
 
 
 def get_calendar_keyboard(year, month):

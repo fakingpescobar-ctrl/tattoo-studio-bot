@@ -60,8 +60,9 @@ def main():
         return
 
     try:
-        from overlay import show_overlay
-        show_overlay()
+        import overlay
+        overlay.set_platform('max')  # баннер с данными MAX, а не Telegram
+        overlay.show_overlay()
     except Exception as e:
         logger.error(f"Overlay error: {e}")
 
@@ -127,16 +128,22 @@ def main():
     threading.Thread(target=reminders_loop, daemon=True).start()
     logger.info("MAX reminders thread started (check every 10 min)")
 
-    # Long polling с авто-восстановлением при сбое сети
+    # Long polling с авто-восстановлением при сбое сети.
+    # Каждый апдейт — в отдельном потоке: сетевой вызов/рейт-пауза одного
+    # хендлера не задерживает обработку следующих нажатий кнопок (иначе
+    # клиенты видят «медленного» бота при сериях тапов).
+    def _safe_handle(upd):
+        try:
+            bot.handle_update(upd)
+        except Exception as e:
+            logger.error(f"Update handling error: {e}")
+
     marker = None
     while True:
         try:
             updates, marker = client.poll_once(marker=marker, types=UPDATE_TYPES)
             for upd in updates:
-                try:
-                    bot.handle_update(upd)
-                except Exception as e:
-                    logger.error(f"Update handling error: {e}")
+                threading.Thread(target=_safe_handle, args=(upd,), daemon=True).start()
         except KeyboardInterrupt:
             logger.info("MAX-бот остановлен (Ctrl+C)")
             print("\n[OK] MAX-бот остановлен. Пока!")

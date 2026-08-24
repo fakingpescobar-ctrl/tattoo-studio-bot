@@ -20,9 +20,7 @@ UI только читает/пишет через этот сервер. Бин
   GET    /api/reviews                — последние отзывы
 """
 import os
-import re
 import secrets
-import time
 from pathlib import Path
 
 import uvicorn
@@ -31,9 +29,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
-import requests
-
-from config import BOT_TOKEN, DB_PATH
+import media_bridge
+from config import DB_PATH
 from database import (delete_booking, delete_portfolio_work, get_all_bookings,
                       get_booking_by_id, get_portfolio, get_rating_stats,
                       get_reviews, get_services, update_booking_status)
@@ -42,8 +39,6 @@ from database import (delete_booking, delete_portfolio_work, get_all_bookings,
 # источник конфигурации меньше, чем рассинхрон env-оверрайдов.
 API_PORT = 8765
 _TOKEN_FILE = Path(__file__).parent / '.api-token'
-# Дисковый кэш скачанных фото портфолио (gitignored).
-_IMG_CACHE = Path(__file__).parent / '_img_cache'
 
 
 def _load_or_create_token() -> str:
@@ -170,40 +165,12 @@ def remove_work(work_id: int, _: None = Depends(require_auth)):
     return {'ok': True}
 
 
-# Неудачные загрузки фото (битые file_id): file_id -> timestamp последней ошибки.
-# 5 минут не дёргаем Telegram повторно — иначе каждое открытие портфолио бьётся вхолостую.
-_IMG_FAILS = {}
-_IMG_FAIL_TTL = 300
-
-
 def _fetch_tg_photo(file_id: str) -> Path | None:
-    """Скачивает фото из Telegram по file_id, кэширует на диск. None при ошибке."""
-    _IMG_CACHE.mkdir(exist_ok=True)
-    safe = re.sub(r'[^A-Za-z0-9_-]', '_', file_id[-20:])
-    cached = _IMG_CACHE / f'{safe}.jpg'
-    if cached.exists() and cached.stat().st_size > 0:
-        return cached
-    if time.time() - _IMG_FAILS.get(file_id, 0) < _IMG_FAIL_TTL:
-        return None
-    try:
-        meta = requests.get(
-            f'https://api.telegram.org/bot{BOT_TOKEN}/getFile',
-            params={'file_id': file_id}, timeout=10)
-        path = meta.json().get('result', {}).get('file_path')
-        if not path:
-            raise ValueError('no file_path in getFile response')
-        photo = requests.get(
-            f'https://api.telegram.org/file/bot{BOT_TOKEN}/{path}', timeout=15)
-        photo.raise_for_status()
-        # Уникальное имя temp-файла: конкурентные запросы одного file_id
-        # не должны чередовать байты в общем .part и закэшировать битый jpeg.
-        tmp = cached.with_suffix(f'.{os.getpid()}.{secrets.token_hex(4)}.part')
-        tmp.write_bytes(photo.content)
-        os.replace(tmp, cached)
-        return cached
-    except (requests.RequestException, ValueError):
-        _IMG_FAILS[file_id] = time.time()
-        return None
+    """Скачивает фото из Telegram по file_id, кэширует на диск. None при ошибке.
+
+    Тонкая обёртка над общим media_bridge (используется и MAX-ботом).
+    """
+    return media_bridge.fetch_tg_file(file_id)
 
 
 @app.get('/api/portfolio/{work_id}/image')

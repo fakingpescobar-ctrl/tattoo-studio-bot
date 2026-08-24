@@ -51,6 +51,9 @@ class MaxApiError(Exception):
 class MaxClient:
     """Обёртка над HTTP API MAX: отправка сообщений, long polling, ответы на колбэки."""
 
+    SEND_INTERVAL = 0.55  # сек между отправками в один диалог
+    SEND_TIMEOUT = 10     # сек на HTTP-запрос отправки (не даём зависнуть потоку апдейтов)
+
     def __init__(self, token=MAX_TOKEN, base=API_BASE):
         if not token:
             raise MaxApiError("MAX_TOKEN не задан — укажите его в .env")
@@ -63,8 +66,8 @@ class MaxClient:
             'Content-Type': 'application/json',
         })
         # Per-dialog rate limit: MAX разрешает не более 2 сообщений/сек в один диалог.
-        # Держим минимум 0.55с между отправками в один user_id.
-        self._last_send = {}  # user_id -> timestamp
+        # Держим минимум SEND_INTERVAL между отправками в один user_id.
+        self._last_send = {}  # user_id -> timestamp (monotonic, момент прошлой отправки)
         self._lock = threading.Lock()
 
     # ---------- низкоуровневый HTTP ----------
@@ -85,14 +88,22 @@ class MaxClient:
             return {}
 
     def _rate_wait(self, user_id):
-        with self._lock:
-            last = self._last_send.get(user_id, 0.0)
-            wait = 0.55 - (time.monotonic() - last)
-            if wait > 0:
-                self._last_send[user_id] = time.monotonic() + wait
-            else:
-                self._last_send[user_id] = time.monotonic()
-        if wait > 0:
+        """Пауза перед отправкой: не более SEND_INTERVAL сообщений в диалог.
+
+        Фикс прежнего бага: раньше в _last_send писали monotonic()+wait
+        («время в будущем»), из-за чего каждая следующая отправка добавляла
+        ещё ~0.55с — задержки накапливались при активном кликанье по меню.
+
+        Слот резервируется под локом до сна: два потока одного диалога
+        (thread-per-update) не должны проснуться синхронно и уйти в API вместе.
+        """
+        while True:
+            with self._lock:
+                last = self._last_send.get(user_id, 0.0)
+                wait = self.SEND_INTERVAL - (time.monotonic() - last)
+                if wait <= 0:
+                    self._last_send[user_id] = time.monotonic()
+                    return
             time.sleep(wait)
 
     # ---------- сообщения ----------
@@ -108,7 +119,7 @@ class MaxClient:
         if fmt:
             body['format'] = fmt
         body['notify'] = notify
-        return self._request('POST', '/messages', params={'user_id': user_id}, json=body)
+        return self._request('POST', '/messages', params={'user_id': user_id}, json=body, timeout=self.SEND_TIMEOUT)
 
     def edit_message(self, message_id, text=None, attachments=None, fmt='html'):
         """Редактирование существующего сообщения (PUT /messages)."""
@@ -119,11 +130,11 @@ class MaxClient:
             body['attachments'] = attachments
         if fmt:
             body['format'] = fmt
-        return self._request('PUT', f'/messages/{message_id}', json=body)
+        return self._request('PUT', f'/messages/{message_id}', json=body, timeout=self.SEND_TIMEOUT)
 
     def delete_message(self, message_id):
         """Удаление сообщения (DELETE /messages/{messageId})."""
-        return self._request('DELETE', f'/messages/{message_id}')
+        return self._request('DELETE', f'/messages/{message_id}', timeout=self.SEND_TIMEOUT)
 
     def answer_callback(self, callback_id, message=None):
         """Ответ на нажатие кнопки (POST /answers).
@@ -132,7 +143,7 @@ class MaxClient:
         body = {}
         if message is not None:
             body['message'] = message
-        return self._request('POST', '/answers', params={'callback_id': callback_id}, json=body)
+        return self._request('POST', '/answers', params={'callback_id': callback_id}, json=body, timeout=self.SEND_TIMEOUT)
 
     def callback_reply(self, callback_id, text=None, attachments=None, fmt='html'):
         """Удобная обёртка: заменить сообщение с кнопками на новый текст/клавиатуру."""
@@ -180,6 +191,13 @@ class MaxClient:
             raise MaxApiError(f"Upload failed HTTP {resp.status_code}: {resp.text[:200]}")
         data = resp.json()
         tok = data.get('token')
+        if not tok:
+            # Для image MAX возвращает словарь размеров: {'photos': {'<id>': {'token': ...}}}
+            photos = data.get('photos') or {}
+            if isinstance(photos, dict) and photos:
+                first = next(iter(photos.values()))
+                if isinstance(first, dict):
+                    tok = first.get('token')
         if not tok:
             raise MaxApiError(f"Upload не вернул token: {data}")
         return tok

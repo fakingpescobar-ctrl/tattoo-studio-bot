@@ -18,6 +18,7 @@ from common import (ACTIVE_BOOKING_STATUSES, BOOKING_STATUS_RU,
                     booking_to_slot_key, fmt_dt, price_text, slot_key)
 from database import *
 from max_keyboards import *
+from media_bridge import fetch_tg_file
 
 logger = logging.getLogger(__name__)
 
@@ -61,6 +62,51 @@ def is_admin(user_id):
     return user_id in MAX_ADMIN_IDS
 
 
+def _as_int(value):
+    """user_id из апдейта MAX -> int (или None). Граница доверия: дальше по
+    коду id всегда int, что бы ни прислал API (int в колбэках, str в сообщениях).
+    """
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        logger.warning(f"Unparseable user_id from update: {value!r}")
+        return None
+
+
+# Мемо-кэш моста TG file_id -> MAX payload: {file_id: (payload|None, monotonic_ts)}.
+# Успех живёт до рестарта процесса, неудача — TTL_IMG_FAIL секунд (не долбим TG/API).
+_MAX_IMG_MEMO: dict = {}
+_TTL_IMG_FAIL = 300.0
+
+
+def _memoized_max_payload(client, tg_file_id):
+    """TG file_id -> payload изображения для attachments MAX (или None).
+
+    Путь: media_bridge.fetch_tg_file (дисковый кэш) -> upload_media -> token.
+    """
+    if not tg_file_id:
+        return None
+    hit = _MAX_IMG_MEMO.get(tg_file_id)
+    if hit:
+        payload, ts = hit
+        fresh = payload is not None or (time.monotonic() - ts) < _TTL_IMG_FAIL
+        if fresh:
+            return payload
+    payload = None
+    try:
+        path = fetch_tg_file(tg_file_id)
+        if path:
+            token = client.upload_media(str(path))
+            if token:
+                payload = {'token': token}
+    except Exception as e:
+        logger.warning(f"Image bridge TG->MAX failed ({tg_file_id[:24]}...): {e}")
+    _MAX_IMG_MEMO[tg_file_id] = (payload, time.monotonic())
+    return payload
+
+
 class MaxBot:
     """Обработчик событий MAX. client — экземпляр MaxClient."""
 
@@ -101,10 +147,33 @@ class MaxBot:
         ВАЖНО: chat_id из апдейта — внутренний id диалога MAX, API НЕ принимает
         его как адресат (POST /messages?user_id=... отвечает Unknown recipient /
         Dialog not found). Для личных диалогов бота адресат — всегда user_id.
+
+        user_id нормализуется к int СРАЗУ на границе: MAX в разных типах апдейтов
+        отдаёт то int, то str, а FSM-ключи (user_states) и bookings.user_id
+        должны совпадать байт-в-байт, иначе состояние «теряется» и клиент
+        вылетает в меню вместо следующего шага.
         """
         utype = update.get('update_type')
-        user = update.get('user') or {}
-        user_id = user.get('user_id')
+        # user у MAX живёт в разных местах апдейта:
+        #   bot_started / message_created -> update['user']
+        #   message_callback              -> update['callback']['user']
+        #   (страховка) сообщение         -> update['message']['sender']
+        user = (update.get('user')
+                or (update.get('callback') or {}).get('user')
+                or (update.get('message') or {}).get('sender')
+                or {})
+        user_id = _as_int(user.get('user_id'))
+        if user_id is None:
+            # Без id нечем адресовать ни callback_reply, ни send_message —
+            # chat_id из апдейта API адресатом не принимает (см. докстринг).
+            # Дампим сырую структуру: у MAX user лежит не во всех типах апдейтов
+            # одинаково — по дампу чиним экстракцию.
+            try:
+                dump = json.dumps(update, ensure_ascii=False)[:600]
+            except (TypeError, ValueError):
+                dump = str(update)[:600]
+            logger.warning(f"Update without usable user_id, dropped: type={utype} raw={dump}")
+            return
         chat_id = user_id or update.get('chat_id')
 
         try:
@@ -127,7 +196,7 @@ class MaxBot:
         body = message.get('body') or {}
         text = body.get('text') or ''
         if not user_id:
-            user_id = (message.get('sender') or {}).get('user_id')
+            user_id = _as_int((message.get('sender') or {}).get('user_id'))
             chat_id = user_id  # адресат всегда user_id (см. докстринг handle_update)
         user = update.get('user') or (message.get('sender') or {})
 
@@ -194,6 +263,11 @@ class MaxBot:
         elif text.strip().lower() in ('старт', 'start', '/start', 'привет', 'меню', 'начать'):
             self.welcome(user_id, chat_id, user)
         else:
+            # Клиент ввёл текст вне FSM-шага. Логируем контекст: если сюда попадает
+            # валидный шаг (например booking_desc) — значит state не нашёлся по uid.
+            logger.info(
+                f"FSM fallback: uid={user_id!r} state={state!r} "
+                f"text={text[:48]!r}")
             self.client.send_message(chat_id,
                 "Используйте кнопки меню 👇 Если потеряли меню — напишите «старт» или нажмите /start",
                 attachments=get_main_menu(is_admin(user_id)))
@@ -231,9 +305,16 @@ class MaxBot:
         clear_state(user_id)
         avg, cnt = get_rating_stats()
         rating_line = f"⭐ Рейтинг: {avg:.1f} ({cnt} отзывов)" if cnt else "⭐ Будь первым!"
+        # Текст 1:1 как в TG /start (handlers.py), чтобы оба бота выглядели одинаково.
         welcome = (f"👋 Привет, {user.get('first_name', '')}!\n\n"
                    f"Я тату-мастер <b>Максим Андреевич</b>. Добро пожаловать! 🎨\n\n"
-                   f"Выбери нужный раздел 👇\n\n{rating_line}")
+                   f"Здесь ты можешь:\n"
+                   f"• 🎨 Посмотреть портфолио работ\n"
+                   f"• 📅 Записаться на татуировку\n"
+                   f"• 💰 Узнать цены\n"
+                   f"• ⭐ Читать и оставлять отзывы\n"
+                   f"• 👤 Управлять своими записями\n\n"
+                   f"{rating_line}\n\nВыбери нужный раздел 👇")
         self.client.send_message(chat_id, welcome, attachments=get_main_menu(is_admin(user_id)))
 
     @timing
@@ -409,13 +490,20 @@ class MaxBot:
         rows.append([{"type": "callback", "text": "◀️ В меню", "payload": "menu"}])
         attachments = [{"type": "inline_keyboard", "payload": {"buttons": rows}}]
 
-        # file_id: для MAX — JSON с payload изображения (url/token); для TG — старая строка
+        # file_id: для MAX — JSON с payload изображения (url/token); для TG —
+        # старая строка file_id, которую мостим: качаем из TG, заливаем в MAX.
         fid = work.get('file_id') or ''
+        img_payload = None
         try:
             img_payload = json.loads(fid)
-            attachments.insert(0, {"type": "image", "payload": img_payload})
+            if not isinstance(img_payload, dict):  # числовой file_id -> int, не payload
+                img_payload = None
         except (ValueError, TypeError):
-            pass  # TG file_id или пусто — шлём только текст
+            pass
+        if img_payload is None:
+            img_payload = _memoized_max_payload(self.client, fid)
+        if img_payload:
+            attachments.insert(0, {"type": "image", "payload": img_payload})
         self.client.callback_reply(callback_id, text=caption, attachments=attachments)
 
     def show_price(self, callback_id):

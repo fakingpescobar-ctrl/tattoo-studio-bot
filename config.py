@@ -33,6 +33,7 @@ if not ADMIN_ID:
 MAX_TOKEN = os.getenv('MAX_TOKEN')
 if not MAX_TOKEN:
     print("[WARN] MAX_TOKEN не указан в .env — MAX-бот недоступен")
+MAX_BOT_HANDLE = os.getenv('MAX_BOT_HANDLE', 'se14062955_bot')  # username MAX-бота (без @)
 
 # Админы MAX (свои ID, НЕ путать с Telegram): MAX_ADMIN_ID=111,222
 MAX_ADMIN_IDS = [int(x) for x in str(os.getenv('MAX_ADMIN_ID', '0')).split(',') if x.strip().isdigit()]
