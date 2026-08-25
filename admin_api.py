@@ -28,6 +28,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
+import psutil
 
 import media_bridge
 from config import DB_PATH
@@ -86,6 +87,40 @@ def require_auth(authorization: str = Header(default='')):
 def health(_: None = Depends(require_auth)):
     from database import _db_epoch
     return {'ok': True, 'db': DB_PATH, 'epoch': _db_epoch()}
+
+
+def _bot_alive(script: str, unique: bool) -> bool:
+    """Жив ли процесс бота. Для main.py (неуникальное имя) дополнительно
+    требуем cwd проекта или путь к нему в cmdline — чужие main.py не считаем."""
+    # DB_PATH может быть относительным ('tattoo_bot.db') — резолвим к абсолютному.
+    root = Path(DB_PATH).resolve().parent.as_posix().lower()
+    for proc in psutil.process_iter(['cmdline']):
+        try:
+            cl = proc.info['cmdline'] or []
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            continue
+        if not any(str(a).replace('/', '\\').lower().endswith(script) for a in cl):
+            continue
+        if unique:
+            return True
+        try:
+            if Path(proc.cwd()).resolve().as_posix().lower() == root:
+                return True
+            if any('tattoo_bot' in str(a).lower() for a in cl):
+                return True
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            continue
+    return False
+
+
+@app.get('/api/services')
+def services_status(_: None = Depends(require_auth)):
+    """Живость ботов для индикаторов сайдбара."""
+    return {
+        'telegram': _bot_alive('main.py', unique=False),
+        'max': _bot_alive('max_main.py', unique=True),
+    }
+
 
 @app.get('/api/stats')
 def stats(_: None = Depends(require_auth)):

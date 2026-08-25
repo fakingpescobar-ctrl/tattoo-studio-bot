@@ -155,6 +155,15 @@ body {
 .live-dot.off { background: var(--st-cancelled); }
 .live-dot.off::after { border-color: var(--st-cancelled); animation: none; display: none; }
 
+/* Индикаторы ботов (Telegram / MAX) рядом с live */
+.svc-item {
+  display: inline-flex; align-items: center; gap: 5px;
+  margin-left: 2px;
+  opacity: .9;
+}
+.svc-dot { width: 6px; height: 6px; }
+.svc-dot::after { inset: -3px; }
+
 @keyframes pulse-ring {
   0%   { transform: scale(.6); opacity: .9; }
   70%  { transform: scale(1.6); opacity: 0; }

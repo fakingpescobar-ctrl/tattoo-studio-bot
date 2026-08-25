@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { getBookings, getHealth, getPortfolio, getReviews, getStats } from './api.js';
+import { getBookings, getHealth, getPortfolio, getReviews, getServices, getStats } from './api.js';
 import { useToast } from './components/Toast.jsx';
 import Sidebar from './components/Sidebar.jsx';
 import StatCards from './components/StatCards.jsx';
@@ -19,6 +19,7 @@ export default function App() {
   const [works, setWorks] = useState([]);
   const [reviews, setReviews] = useState([]);
   const [connected, setConnected] = useState(false);
+  const [services, setServices] = useState({ telegram: false, max: false });
   const [loaded, setLoaded] = useState(false);
   const epochRef = useRef(undefined);
   const toast = useToast();
@@ -46,9 +47,10 @@ export default function App() {
     }
   }, [toast]);
 
-  // Live-режим: поллинг health каждые 4с; смена эпохи -> тихая перезагрузка данных.
+  // Live-режим: поллинг health + статусов ботов каждые 4с; смена эпохи -> тихая перезагрузка.
   useEffect(() => {
     loadAll({ silent: true });
+    getServices().then(setServices).catch(() => setServices({ telegram: false, max: false }));
     const iv = setInterval(async () => {
       try {
         const h = await getHealth();
@@ -57,6 +59,7 @@ export default function App() {
       } catch {
         setConnected(false);
       }
+      getServices().then(setServices).catch(() => setServices({ telegram: false, max: false }));
     }, 4000);
     return () => clearInterval(iv);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -66,7 +69,7 @@ export default function App() {
     <>
       <div className="atmosphere" />
       <div className="app">
-        <Sidebar view={view} onView={setView} connected={connected} />
+        <Sidebar view={view} onView={setView} connected={connected} services={services} />
 
         <header className="topbar">
           <h1>{VIEW_TITLES[view]}</h1>
