@@ -18,6 +18,11 @@ UI только читает/пишет через этот сервер. Бин
   GET    /api/portfolio              — работы портфолио
   DELETE /api/portfolio/{id}         — удалить работу
   GET    /api/reviews                — последние отзывы
+  PUT    /api/reviews/{id}           — редактировать отзыв (rating, text)
+  DELETE /api/reviews/{id}           — удалить отзыв
+  POST   /api/reviews/{id}/reply     — ответ админа на отзыв
+  POST   /api/reviews/{id}/like      — лайк отзыву
+  POST   /api/reviews/{id}/featured  —.toggle избранного
 """
 import os
 import secrets
@@ -32,9 +37,11 @@ import psutil
 
 import media_bridge
 from config import DB_PATH
-from database import (delete_booking, delete_portfolio_work, get_all_bookings,
-                      get_booking_by_id, get_portfolio, get_rating_stats,
-                      get_reviews, get_services, update_booking_status)
+from database import (delete_booking, delete_portfolio_work, delete_review,
+                      edit_review, get_all_bookings, get_booking_by_id,
+                      get_portfolio, get_rating_stats, get_review_by_id,
+                      get_reviews, get_services, like_review,
+                      reply_to_review, toggle_featured, update_booking_status)
 
 # Порт зашит с двух сторон (здесь и в admin/src/api.js) НАРОЧНО: один
 # источник конфигурации меньше, чем рассинхрон env-оверрайдов.
@@ -222,6 +229,59 @@ def work_image(work_id: int, _: None = Depends(require_auth)):
 @app.get('/api/reviews')
 def reviews(_: None = Depends(require_auth)):
     return [dict(r) for r in get_reviews(limit=100)]
+
+
+class ReviewEditBody(BaseModel):
+    rating: int | None = None
+    text: str | None = None
+
+
+@app.put('/api/reviews/{review_id}')
+def update_review(review_id: int, body: ReviewEditBody, _: None = Depends(require_auth)):
+    if get_review_by_id(review_id) is None:
+        raise HTTPException(status_code=404, detail='Review not found')
+    if body.rating is not None and not (1 <= body.rating <= 5):
+        raise HTTPException(status_code=422, detail='rating must be 1-5')
+    edit_review(review_id, rating=body.rating, text=body.text)
+    return {'ok': True, 'id': review_id}
+
+
+@app.delete('/api/reviews/{review_id}')
+def remove_review(review_id: int, _: None = Depends(require_auth)):
+    if get_review_by_id(review_id) is None:
+        raise HTTPException(status_code=404, detail='Review not found')
+    delete_review(review_id)
+    return {'ok': True}
+
+
+class ReplyBody(BaseModel):
+    text: str
+
+
+@app.post('/api/reviews/{review_id}/reply')
+def review_reply(review_id: int, body: ReplyBody, _: None = Depends(require_auth)):
+    if get_review_by_id(review_id) is None:
+        raise HTTPException(status_code=404, detail='Review not found')
+    if not body.text.strip():
+        raise HTTPException(status_code=422, detail='Reply text required')
+    reply_to_review(review_id, body.text.strip())
+    return {'ok': True, 'id': review_id}
+
+
+@app.post('/api/reviews/{review_id}/like')
+def review_like(review_id: int, _: None = Depends(require_auth)):
+    if get_review_by_id(review_id) is None:
+        raise HTTPException(status_code=404, detail='Review not found')
+    like_review(review_id)
+    return {'ok': True, 'id': review_id}
+
+
+@app.post('/api/reviews/{review_id}/featured')
+def review_featured(review_id: int, _: None = Depends(require_auth)):
+    if get_review_by_id(review_id) is None:
+        raise HTTPException(status_code=404, detail='Review not found')
+    val = toggle_featured(review_id)
+    return {'ok': True, 'id': review_id, 'is_featured': val}
 
 
 if __name__ == '__main__':

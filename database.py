@@ -139,6 +139,18 @@ def init_db():
         "WHERE updated_at < datetime('now', '-7 days')"
     )
 
+    # Миграции reviews: добавляем колонки для админ-управления отзывами
+    for col, typedef in [
+        ('admin_reply', "TEXT"),
+        ('admin_reply_at', "TIMESTAMP"),
+        ('likes', "INTEGER DEFAULT 0"),
+        ('is_featured', "INTEGER DEFAULT 0"),
+    ]:
+        try:
+            cursor.execute(f'ALTER TABLE reviews ADD COLUMN {col} {typedef}')
+        except sqlite3.OperationalError:
+            pass  # колонка уже существует
+
     conn.commit()
     conn.close()
     print("База данных успешно инициализирована!")
@@ -503,6 +515,104 @@ def get_rating_stats():
         ttl=10
     )
     return (row['avg'] or 0, row['cnt'] or 0)
+
+
+def get_review_by_id(review_id):
+    """Получить отзыв по ID (без кэша — для модификаций)."""
+    conn = get_db()
+    row = conn.execute('SELECT * FROM reviews WHERE id = ?', (review_id,)).fetchone()
+    conn.close()
+    return row
+
+
+def edit_review(review_id, rating=None, text=None):
+    """Редактирование рейтинга и/или текста отзыва."""
+    conn = get_db()
+    row = conn.execute('SELECT id FROM reviews WHERE id = ?', (review_id,)).fetchone()
+    if row is None:
+        conn.close()
+        return False
+    updates, params = [], []
+    if rating is not None:
+        updates.append('rating = ?')
+        params.append(rating)
+    if text is not None:
+        updates.append('text = ?')
+        params.append(text)
+    if not updates:
+        conn.close()
+        return False
+    params.append(review_id)
+    conn.execute(f'UPDATE reviews SET {", ".join(updates)} WHERE id = ?', params)
+    conn.commit()
+    conn.close()
+    invalidate_cache('get_reviews', 'get_rating_stats')
+    _bump_epoch()
+    return True
+
+
+def delete_review(review_id):
+    """Удаление отзыва по ID."""
+    conn = get_db()
+    row = conn.execute('SELECT id FROM reviews WHERE id = ?', (review_id,)).fetchone()
+    if row is None:
+        conn.close()
+        return False
+    conn.execute('DELETE FROM reviews WHERE id = ?', (review_id,))
+    conn.commit()
+    conn.close()
+    invalidate_cache('get_reviews', 'get_rating_stats')
+    _bump_epoch()
+    return True
+
+
+def reply_to_review(review_id, text):
+    """Ответ админа на отзыв."""
+    conn = get_db()
+    row = conn.execute('SELECT id FROM reviews WHERE id = ?', (review_id,)).fetchone()
+    if row is None:
+        conn.close()
+        return False
+    conn.execute(
+        'UPDATE reviews SET admin_reply = ?, admin_reply_at = CURRENT_TIMESTAMP WHERE id = ?',
+        (text, review_id)
+    )
+    conn.commit()
+    conn.close()
+    invalidate_cache('get_reviews')
+    _bump_epoch()
+    return True
+
+
+def like_review(review_id):
+    """Поставить лайк отзыву (+1)."""
+    conn = get_db()
+    row = conn.execute('SELECT id FROM reviews WHERE id = ?', (review_id,)).fetchone()
+    if row is None:
+        conn.close()
+        return False
+    conn.execute('UPDATE reviews SET likes = likes + 1 WHERE id = ?', (review_id,))
+    conn.commit()
+    conn.close()
+    invalidate_cache('get_reviews')
+    _bump_epoch()
+    return True
+
+
+def toggle_featured(review_id):
+    """Переключить статус «избранное» для отзыва."""
+    conn = get_db()
+    row = conn.execute('SELECT id, is_featured FROM reviews WHERE id = ?', (review_id,)).fetchone()
+    if row is None:
+        conn.close()
+        return None
+    new_val = 0 if row['is_featured'] else 1
+    conn.execute('UPDATE reviews SET is_featured = ? WHERE id = ?', (new_val, review_id))
+    conn.commit()
+    conn.close()
+    invalidate_cache('get_reviews')
+    _bump_epoch()
+    return new_val
 
 
 # ============ FSM ============

@@ -47,6 +47,15 @@ export const deleteBooking = (id) => api(`/api/bookings/${id}`, { method: 'DELET
 export const getPortfolio  = () => api('/api/portfolio');
 export const deleteWork    = (id) => api(`/api/portfolio/${id}`, { method: 'DELETE' });
 export const getReviews    = () => api('/api/reviews');
+export const deleteReview  = (id) => api(`/api/reviews/${id}`, { method: 'DELETE' });
+export const editReview    = (id, data) =>
+  api(`/api/reviews/${id}`, { method: 'PUT', body: JSON.stringify(data) });
+export const replyToReview = (id, text) =>
+  api(`/api/reviews/${id}/reply`, { method: 'POST', body: JSON.stringify({ text }) });
+export const likeReview    = (id) =>
+  api(`/api/reviews/${id}/like`, { method: 'POST' });
+export const toggleFeatured = (id) =>
+  api(`/api/reviews/${id}/featured`, { method: 'POST' });
 
 export const STATUS_LABELS = {
   pending: 'Ожидает',

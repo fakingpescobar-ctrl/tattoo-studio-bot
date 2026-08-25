@@ -98,7 +98,7 @@ export default function App() {
                 </>
               )}
               {view === 'portfolio' && <PortfolioView works={works} onChanged={() => loadAll({ silent: true })} />}
-              {view === 'reviews' && <ReviewsView reviews={reviews} />}
+              {view === 'reviews' && <ReviewsView reviews={reviews} onChanged={() => loadAll({ silent: true })} />}
             </>
           )}
         </main>

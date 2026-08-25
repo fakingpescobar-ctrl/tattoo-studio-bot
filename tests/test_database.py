@@ -70,7 +70,11 @@ def tmp_db(monkeypatch):
             username TEXT,
             rating INTEGER,
             text TEXT,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            admin_reply TEXT,
+            admin_reply_at TIMESTAMP,
+            likes INTEGER DEFAULT 0,
+            is_featured INTEGER DEFAULT 0
         );
         CREATE TABLE blocked_slots (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -298,6 +302,94 @@ def test_get_reviews(tmp_db):
     reviews = database.get_reviews()
     assert len(reviews) == 1
     assert reviews[0]['rating'] == 5
+
+
+def test_edit_review(tmp_db):
+    database.add_review(410, "editor", 3, "Окей")
+    database.invalidate_cache('get_reviews')
+    reviews = database.get_reviews()
+    review_id = reviews[0]['id']
+
+    # Редактируем рейтинг и текст
+    assert database.edit_review(review_id, rating=5, text="Отлично!") is True
+    database.invalidate_cache('get_reviews')
+    updated = database.get_review_by_id(review_id)
+    assert updated['rating'] == 5
+    assert updated['text'] == "Отлично!"
+
+    # Только текст
+    assert database.edit_review(review_id, text="Супер!") is True
+    assert database.get_review_by_id(review_id)['text'] == "Супер!"
+
+    # Несуществующий отзыв
+    assert database.edit_review(99999, text="nope") is False
+
+
+def test_delete_review(tmp_db):
+    database.add_review(420, "deleter", 4, "Удалить меня")
+    database.invalidate_cache('get_reviews')
+    reviews = database.get_reviews()
+    review_id = reviews[0]['id']
+
+    assert database.delete_review(review_id) is True
+    database.invalidate_cache('get_reviews')
+    assert len(database.get_reviews()) == 0
+
+    # Повторное удаление
+    assert database.delete_review(review_id) is False
+
+
+def test_reply_to_review(tmp_db):
+    database.add_review(430, "replier", 5, "Класс!")
+    database.invalidate_cache('get_reviews')
+    reviews = database.get_reviews()
+    review_id = reviews[0]['id']
+
+    assert database.reply_to_review(review_id, "Спасибо за отзыв!") is True
+    review = database.get_review_by_id(review_id)
+    assert review['admin_reply'] == "Спасибо за отзыв!"
+    assert review['admin_reply_at'] is not None
+
+    # Несуществующий отзыв
+    assert database.reply_to_review(99999, "nope") is False
+
+
+def test_like_review(tmp_db):
+    database.add_review(440, "liker", 4, "Норм")
+    database.invalidate_cache('get_reviews')
+    reviews = database.get_reviews()
+    review_id = reviews[0]['id']
+
+    # Первый лайк
+    assert database.like_review(review_id) is True
+    assert database.get_review_by_id(review_id)['likes'] == 1
+
+    # Второй лайк
+    database.like_review(review_id)
+    assert database.get_review_by_id(review_id)['likes'] == 2
+
+    # Несуществующий отзыв
+    assert database.like_review(99999) is False
+
+
+def test_toggle_featured(tmp_db):
+    database.add_review(450, "featurer", 5, "Избранное!")
+    database.invalidate_cache('get_reviews')
+    reviews = database.get_reviews()
+    review_id = reviews[0]['id']
+
+    # Включаем
+    val = database.toggle_featured(review_id)
+    assert val == 1
+    assert database.get_review_by_id(review_id)['is_featured'] == 1
+
+    # Выключаем
+    val = database.toggle_featured(review_id)
+    assert val == 0
+    assert database.get_review_by_id(review_id)['is_featured'] == 0
+
+    # Несуществующий отзыв
+    assert database.toggle_featured(99999) is None
 
 
 # -------------- FSM (СОСТОЯНИЯ) --------------

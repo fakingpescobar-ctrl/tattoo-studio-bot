@@ -260,6 +260,22 @@ class MaxBot:
                                          attachments=get_admin_keyboard())
             except Exception:
                 self.client.send_message(chat_id, "⚠️ Не удалось отправить (клиент остановил бота?).")
+        elif state == 'admin_review_reply' and is_admin(user_id):
+            data = get_state_data(user_id)
+            review_id = data.get('review_id')
+            clear_state(user_id)
+            from database import reply_to_review, get_review_by_id
+            review = get_review_by_id(review_id)
+            if review:
+                reply_to_review(review_id, text)
+                self.client.send_message(chat_id,
+                    f"✅ Ответ на отзыв #{review_id} отправлен!\n\n"
+                    f"💬 <b>Отзыв:</b> {(review['text'] or '')[:80]}…\n"
+                    f"📝 <b>Ваш ответ:</b> {text}",
+                    attachments=get_admin_keyboard())
+            else:
+                self.client.send_message(chat_id, "⚠️ Отзыв не найден.",
+                    attachments=get_admin_keyboard())
         elif text.strip().lower() in ('старт', 'start', '/start', 'привет', 'меню', 'начать'):
             self.welcome(user_id, chat_id, user)
         else:
@@ -457,6 +473,11 @@ class MaxBot:
                         else "⚠️ Нечего блокировать: день/часы уже прошли")
                 self.client.callback_reply(callback_id, text=text,
                     attachments=get_admin_time_keyboard(y, m, d, blocked))
+            elif data.startswith("admin_reply_review_"):
+                review_id = int(data.split("_")[3])
+                save_state(user_id, 'admin_review_reply', {'review_id': review_id})
+                self.client.callback_reply(callback_id,
+                    text="💬 <b>Ответ на отзыв</b>\n\nНапишите текст ответа:")
             else:
                 logger.info(f"Unknown callback: {data}")
                 self.client.answer_callback(callback_id)
@@ -530,7 +551,12 @@ class MaxBot:
             header = "⭐ <b>Отзывы</b>\n\nПока нет отзывов.\n\n"
         body = ""
         for r in reviews[:10]:
-            body += f"{'⭐' * r['rating']}\n💬 {r['text']}\n— @{r['username'] or 'Аноним'}\n\n"
+            body += f"{'⭐' * r['rating']}\n💬 {r['text']}\n— @{r['username'] or 'Аноним'}"
+            if r.get('admin_reply'):
+                body += f"\n\n💬 <b>Ответ мастера:</b> {r['admin_reply']}"
+            if r.get('likes'):
+                body += f"\n❤️ {r['likes']}"
+            body += "\n\n"
         self.client.callback_reply(callback_id, text=header + body, attachments=get_reviews_keyboard())
 
     def show_my_bookings(self, callback_id, user_id):

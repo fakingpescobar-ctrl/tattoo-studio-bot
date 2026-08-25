@@ -235,6 +235,11 @@ def register_callbacks(bot, user_commands, rate_limit_window, rate_limit_count, 
                 blocked = get_blocked_slots()
                 bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id,
                                             reply_markup=get_admin_time_keyboard(y, m, d, blocked))
+            elif data.startswith("admin_reply_review_"):
+                review_id = int(data.split("_")[3])
+                save_state(user_id, 'admin_review_reply', {'review_id': review_id})
+                bot.edit_message_text("💬 <b>Ответ на отзыв</b>\n\nНапишите текст ответа:",
+                                     call.message.chat.id, call.message.message_id)
             elif data == "ignore":
                 pass
         except ApiException as e:
@@ -332,7 +337,12 @@ def register_callbacks(bot, user_commands, rate_limit_window, rate_limit_count, 
             header = "⭐ <b>Отзывы</b>\n\nПока нет отзывов.\n\n"
         body = ""
         for r in reviews[:10]:
-            body += f"{'⭐' * r['rating']}\n💬 {r['text']}\n— @{r['username'] or 'Аноним'}\n\n"
+            body += f"{'⭐' * r['rating']}\n💬 {r['text']}\n— @{r['username'] or 'Аноним'}"
+            if r.get('admin_reply'):
+                body += f"\n\n💬 <b>Ответ мастера:</b> {r['admin_reply']}"
+            if r.get('likes'):
+                body += f"\n❤️ {r['likes']}"
+            body += "\n\n"
         bot.edit_message_text(header + body, call.message.chat.id, call.message.message_id,
                               reply_markup=get_reviews_keyboard())
 
@@ -635,6 +645,21 @@ def register_callbacks(bot, user_commands, rate_limit_window, rate_limit_count, 
                 bot.send_message(message.chat.id, "✅ Сообщение отправлено клиенту.", reply_markup=get_admin_keyboard())
             except Exception:
                 bot.send_message(message.chat.id, "⚠️ Не удалось отправить (клиент заблокировал бота?).")
+        elif state == 'admin_review_reply' and is_admin(user_id):
+            data = get_state_data(user_id)
+            review_id = data.get('review_id')
+            database.clear_state(user_id)
+            from database import reply_to_review, get_review_by_id
+            review = get_review_by_id(review_id)
+            if review:
+                reply_to_review(review_id, message.text)
+                bot.send_message(message.chat.id,
+                    f"✅ Ответ на отзыв #{review_id} отправлен!\n\n"
+                    f"💬 <b>Отзыв:</b> {(review['text'] or '')[:80]}…\n"
+                    f"📝 <b>Ваш ответ:</b> {message.text}",
+                    reply_markup=get_admin_keyboard())
+            else:
+                bot.send_message(message.chat.id, "⚠️ Отзыв не найден.", reply_markup=get_admin_keyboard())
         elif message.text.strip().lower() in ('старт', 'start', '/start', 'привет', 'меню', 'начать'):
             user = message.from_user
             save_user(user.id, user.username, user.first_name, user.last_name)

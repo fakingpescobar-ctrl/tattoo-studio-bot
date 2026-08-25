@@ -442,6 +442,7 @@ tbody tr:hover { background: var(--card-hover); }
   padding: 16px 18px;
   animation: row-in .4s var(--ease-out) backwards;
 }
+.review-card.featured { border-color: var(--orange); box-shadow: 0 0 0 1px var(--orange); }
 .review-head { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
 .review-stars { color: var(--orange); letter-spacing: 2px; font-size: 13px; }
 .review-name { font-weight: 700; font-size: 13.5px; }
@@ -449,6 +450,62 @@ tbody tr:hover { background: var(--card-hover); }
   margin-left: auto; font-family: var(--font-mono); font-size: 10.5px; color: var(--faint);
 }
 .review-text { font-size: 13px; color: #c9c9d1; line-height: 1.55; }
+
+/* Ответ админа */
+.review-reply {
+  margin-top: 10px; padding: 10px 12px;
+  background: rgba(157, 78, 237, 0.08);
+  border-left: 3px solid var(--purple);
+  border-radius: 0 8px 8px 0;
+  font-size: 12.5px;
+}
+.review-reply-label { font-weight: 600; color: var(--purple); font-size: 11px; }
+.review-reply-text { color: #c9c9d1; margin-top: 4px; line-height: 1.5; }
+.review-reply-date { color: var(--faint); font-family: var(--font-mono); font-size: 10px; margin-top: 4px; display: block; }
+
+/* Кнопки действий отзывов */
+.review-actions {
+  display: flex; gap: 6px; margin-top: 10px; padding-top: 10px;
+  border-top: 1px solid var(--line-soft);
+}
+
+/* Редактирование */
+.review-edit { margin-top: 8px; }
+.review-edit-stars { display: flex; gap: 4px; margin-bottom: 8px; }
+.star-btn {
+  background: none; border: none; font-size: 18px; cursor: pointer;
+  color: var(--faint); transition: color .15s;
+}
+.star-btn.active { color: var(--orange); }
+.star-btn:hover { color: var(--orange); }
+.review-edit-text {
+  width: 100%; background: var(--bg); border: 1px solid var(--line-soft);
+  border-radius: 8px; padding: 8px 10px; color: #c9c9d1; font-size: 13px;
+  font-family: inherit; resize: vertical;
+}
+.review-edit-actions { display: flex; gap: 8px; margin-top: 8px; justify-content: flex-end; }
+
+/* Поле ответа */
+.review-reply-input { margin-top: 10px; }
+.review-reply-input textarea {
+  width: 100%; background: var(--bg); border: 1px solid var(--line-soft);
+  border-radius: 8px; padding: 8px 10px; color: #c9c9d1; font-size: 13px;
+  font-family: inherit; resize: vertical;
+}
+
+/* Кнопки like/feat */
+.icon-btn.like { color: var(--faint); }
+.icon-btn.like.liked { color: #ff6b8a; }
+.icon-btn.like.liked:hover { color: #ff4570; }
+.icon-btn.feat { color: var(--faint); font-size: 14px; }
+.icon-btn.feat.active { color: var(--orange); }
+.icon-btn.share { color: var(--faint); }
+.icon-btn.share:hover { color: var(--purple); }
+.icon-btn.reply { color: var(--faint); }
+.icon-btn.reply:hover { color: var(--purple); }
+.icon-btn.edit { color: var(--faint); }
+.icon-btn.edit:hover { color: var(--orange); }
+.like-count { font-size: 11px; margin-left: 2px; }
 
 .reviews-col { display: flex; flex-direction: column; gap: 12px; max-width: 760px; }
 
