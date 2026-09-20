@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: #0a0a0c;
+    color: #e8e2ee;
+    font-family: 'Segoe UI', Arial, sans-serif;
+    display: flex; align-items: center; justify-content: center;
+    padding: 32px;
+    position: relative; overflow: hidden;
+  }
+  .glow.o { position: absolute; width: 420px; height: 420px; border-radius: 50%; top: -160px; right: -140px;
+    background: radial-gradient(circle, rgba(255,140,66,.35), transparent 70%); }
+  .glow.v { position: absolute; width: 460px; height: 460px; border-radius: 50%; bottom: -200px; left: -160px;
+    background: radial-gradient(circle, rgba(157,78,221,.38), transparent 70%); }
+  .card { position: relative; z-index: 2; width: 480px; max-width: 100%;
+    background: #131118; border: 1px solid #2a2433; border-radius: 16px; padding: 40px 36px; }
+  .logo { font-size: 30px; letter-spacing: 3px; font-weight: 800;
+    background: linear-gradient(100deg, #ff8c42, #ffb36d 45%, #9d4edd);
+    -webkit-background-clip: text; background-clip: text; color: transparent; }
+  h1 { font-size: 16px; font-weight: 400; margin-top: 6px; color: #a89fb5; }
+  .status { margin-top: 18px; font-size: 13.5px; color: #cfc6d8; min-height: 18px; }
+  .bar-wrap { margin-top: 8px; height: 6px; background: #221d29; border-radius: 3px; overflow: hidden; }
+  .bar { height: 100%; width: 0; border-radius: 3px;
+    background: linear-gradient(90deg, #ff8c42, #9d4edd); transition: width .4s ease; }
+  .bar.indet { width: 40%; animation: indet 1.2s ease-in-out infinite; }
+  @keyframes indet { 0% { margin-left: -40%; } 100% { margin-left: 100%; } }
+  .form { display: none; margin-top: 22px; }
+  label { display: block; font-size: 12px; color: #a89fb5; margin: 10px 0 4px; }
+  input { width: 100%; padding: 9px 12px; border-radius: 8px; border: 1px solid #3a3242;
+    background: #0d0b10; color: #e8e2ee; font-size: 14px; outline: none; }
+  input:focus { border-color: #ff8c42; }
+  .hint { font-size: 11px; color: #776e85; margin-top: 4px; }
+  button { margin-top: 20px; width: 100%; padding: 11px; border: 0; border-radius: 9px; font-size: 15px;
+    background: linear-gradient(100deg, #ff8c42, #e86f2c); color: #150d06; font-weight: 700; cursor: pointer; }
+  button:disabled { opacity: .5; cursor: wait; }
+  .err { display: none; margin-top: 10px; color: #ff8c7a; font-size: 12.5px; }
+  .done { display: none; margin-top: 18px; font-size: 13.5px; color: #a5e6a5; }
+</style>
+</head>
+<body>
+  <div class="glow o"></div><div class="glow v"></div>
+  <div class="card">
+    <div class="logo">PRIZMA</div>
+    <h1>Автонастройка тату-студии — подождите чуть-чуть</h1>
+
+    <div class="status" id="status">Проверяю окружение…</div>
+    <div class="bar-wrap"><div class="bar indet" id="bar"></div></div>
+
+    <div class="form" id="form">
+      <div style="font-size:14px;color:#e8e2ee;">Почти готово — укажите токены бота:</div>
+      <label>Telegram: BOT_TOKEN</label>
+      <input id="bot_token" placeholder="123456:ABC-DEF…" autocomplete="off">
+      <label>Telegram: ADMIN_ID (ваш ID)</label>
+      <input id="admin_id" placeholder="123456789" inputmode="numeric">
+      <div class="hint">Откройте @BotFather → /newbot, чтобы получить токен. Ваш ID подскажет @userinfobot.</div>
+      <label>MAX (VK): MAX_TOKEN — необязательно</label>
+      <input id="max_token" placeholder="(пусто — MAX-бот не включится)" autocomplete="off">
+      <label>MAX: MAX_ADMIN_ID — ваш ID в MAX</label>
+      <input id="max_admin_id" placeholder="(пусто)" inputmode="numeric">
+      <button id="save">Сохранить и открыть панель</button>
+      <div class="err" id="err"></div>
+    </div>
+
+    <div class="done" id="done">Всё готово, открываю панель…</div>
+  </div>
+
+<script>
+  const $ = (id) => document.getElementById(id);
+  const bar = $('bar'), st = $('status');
+
+  function setBar(pct) {
+    bar.classList.remove('indet');
+    bar.style.width = (pct == null ? 8 : pct) + '%';
+  }
+
+  window.prizma.onRuntimeStatus((m) => {
+    if (!m) return;
+    st.textContent = m.msg || m.stage || '';
+    if (m.pct != null) setBar(m.pct); else if (m.stage !== 'download') setBar(null);
+  });
+
+  window.prizma.onSetupDone((info) => {
+    $('done').style.display = info && info.needConfig ? 'none' : 'block';
+    if (info && info.needConfig) { $('form').style.display = 'block'; setBar(100); }
+    st.textContent = info && info.needConfig
+      ? 'Рантайм установлен. Заполните токены — и панель заработает.'
+      : 'Рантайм готов, открываю панель…';
+    if (info && info.needConfig) $('done').style.display = 'none';
+  });
+
+  $('save').addEventListener('click', async () => {
+    const botToken = $('bot_token').value.trim();
+    const adminId = $('admin_id').value.trim();
+    if (!botToken) return showErr('BOT_TOKEN пустой — без него Telegram-бот не запустится.');
+    if (!adminId) return showErr('ADMIN_ID пустой — укажите свой Telegram ID.');
+    $('save').disabled = true;
+    const r = await window.prizma.saveEnv({
+      BOT_TOKEN: botToken,
+      ADMIN_ID: adminId,
+      MAX_TOKEN: $('max_token').value.trim(),
+      MAX_ADMIN_ID: $('max_admin_id').value.trim(),
+    });
+    if (r && r.ok) {
+      $('form').style.display = 'none';
+      $('done').style.display = 'block';
+      $('done').textContent = 'Токены сохранены, запускаю боты…';
+      await window.prizma.goSpa();
+    } else {
+      showErr((r && r.error) || 'Не удалось сохранить .env');
+      $('save').disabled = false;
+    }
+  });
+
+  function showErr(msg) { const e = $('err'); e.textContent = msg; e.style.display = 'block'; }
+</script>
+</body>
+</html>

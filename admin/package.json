@@ -23,6 +23,28 @@
       "electron/**/*",
       "package.json"
     ],
+    "extraResources": [
+      {
+        "from": "..",
+        "to": "project",
+        "filter": [
+          "*.py",
+          "*.txt",
+          "*.bat",
+          ".env.example",
+          "certs/**/*",
+          "tests/**/*",
+          "admin/electron/**/*",
+          "admin/src/**/*",
+          "admin/dev.mjs",
+          "admin/package.json",
+          "admin/index.html",
+          "admin/vite.config.*",
+          "!_diag_*.py",
+          "!*_test.py"
+        ]
+      }
+    ],
     "win": {
       "target": [
         {

@@ -291,15 +291,18 @@ python max_main.py
 
 ## 🖥️ Админ-панель (Electron)
 
-### Вариант A — готовый `.exe` (проще всего)
-1. Скачай `PRIZMA-Admin.exe` из [Releases](https://github.com/fakingpescobar-ctrl/tattoo-studio-bot/releases)
-2. Панель работает с **папкой проекта**: переменная окружения `PRIZMA_PROJECT_ROOT` (в собранной сборке по умолчанию `C:\Projects\tattoo_bot`). Если проект лежит не там — задай `PRIZMA_PROJECT_ROOT` равным своей папке: `setx PRIZMA_PROJECT_ROOT "D:\путь\к\проекту"` (или пересобери exe со своим путём)
-3. Запусти. Приложение само:
-   - найдёт Python (сначала env `PRIZMA_PYTHON`, затем `%USERPROFILE%\anaconda3\python.exe`, затем `python` из PATH) — и станет под управляемыми им процессами: `admin_api.py` + боты (`main.py`, `max_main.py`)
-   - перед стартом аккуратно прибьёт свои старые процессы (защита от конфликта портов), дождётся токена API (`.api-token`) и откроет окно
-   - все выводы процессов пишет в `logs/` внутри папки проекта (`admin_api_stdout.log`, `tg_bot_stdout.log`, `max_bot_stdout.log`)
+### Вариант A — готовый `.exe` (проще всего) — ставит всё сам 🎉
+1. Скачай `PRIZMA-Admin.exe` из [Releases](https://github.com/fakingpescobar-ctrl/tattoo-studio-bot/releases). Никакой установки Python/Node заранее не нужно — exe приносит **весь бот-проект внутри себя** (код, зависимости Python, миграции БД).
+2. Запусти exe. При первом старте появится окно **автонастройки** — оно само:
+   - развернёт код ботов из ресурсов exe в `%LOCALAPPDATA%\PRIZMA\project` (на второй запуск — пропустит);
+   - найдёт системный Python 3.10+ — если его нет, **скачает изолированный portable Python 3.12** в `%LOCALAPPDATA%\PRIZMA\runtime` (систему не трогает);
+   - поставит все зависимости (`pip install -r requirements.txt`) в изолированное окружение;
+   - создаст `.env` из шаблона и **развернёт базу данных** `tattoo_bot.db` (все таблицы + демо-данные);
+   - затем покажет форму: вставь `BOT_TOKEN`, `ADMIN_ID` (и при желании токены MAX) → поехали.
+3. Панель стартует под управляемыми процессами: `admin_api.py` + боты (`main.py`, `max_main.py`); перед стартом аккуратно прибьёт свои старые процессы, дождётся токена API (`.api-token`) и откроет окно. Все выводы — в `logs/` внутри папки проекта.
+4. Обновление: просто скачай новый exe и запусти — код проекта в `%LOCALAPPDATA%\PRIZMA\project` обновится, `.env` и `tattoo_bot.db` останутся (их exe не трогает).
 
-  ⚠️ **Зависимости панель НЕ ставит.** Установи их заранее (Шаг 2): `pip install -r requirements.txt`. Если Python не найден или пакетов нет — процесс упадёт, причина будет в соответствующем логе `logs/`.
+> Если у тебя уже есть папка проекта (например `C:\Projects\tattoo_bot`) — задай `PRIZMA_PROJECT_ROOT=` на неё: панель будет работать с ней, а не со своей копией.
 
 ### Вариант B — из исходников (для разработки)
 ```bash
@@ -343,13 +346,16 @@ tattoo-studio-bot/
 │
 ├── admin/               # Electron-панель
 │   ├── electron/
-│   │   ├── main.cjs         # супервизор: поиск Python, запуск api/ботов,
-│   │   │                    #   порт-гейт (зависимости ставит не он!)
+│   │   ├── main.cjs         # супервизор: Python-рантайм, запуск api/ботов,
+│   │   │                    #   порт-гейт, splash-окно первого запуска
+│   │   ├── runtime.cjs      # авторазвёртывание: Python + deps + .env + БД
+│   │   ├── splash.html      # окно прогресса установки + форма токенов
 │   │   └── preload.cjs      # безопасный мост renderer ↔ main
 │   ├── dev.mjs              # dev-запуск (Vite + Electron)
 │   ├── package.json
 │   └── src/                 # React UI (Vite)
 │
+├── prizma_run.py         # запуск бэкендов в embeddable Python (sys.path)
 ├── assets/              # брендинг (баннер README)
 ├── tests/test_database.py   # тесты БД (40 шт.)
 ├── requirements.txt
