@@ -1,0 +1,83 @@
+# Автосборка PRIZMA-Admin.exe и публикация GitHub Release.
+#
+#  - push в master        → сборка exe (проверка, что собирается) + артефакт
+#  - push тега v*         → сборка + публикация Release с exe
+#  - workflow_dispatch    → ручной запуск (Actions → Run workflow)
+#
+# Как выпустить релиз:
+#   git tag v1.3.0 && git push origin v1.3.0
+name: build-release
+
+on:
+  push:
+    branches: [master]
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: admin/package-lock.json
+
+      - name: Install deps (npm ci)
+        working-directory: admin
+        run: npm ci --no-audit --no-fund
+
+      - name: Build portable exe
+        working-directory: admin
+        run: npm run dist
+
+      - name: Verify bundle inside exe resources
+        shell: pwsh
+        run: |
+          $b = "admin/release/win-unpacked/resources/project"
+          if (-not (Test-Path "$b/admin_api.py")) { throw "bundle missing admin_api.py" }
+          if (-not (Test-Path "$b/prizma_run.py")) { throw "bundle missing prizma_run.py" }
+          if (-not (Test-Path "$b/admin/electron/runtime.cjs")) { throw "bundle missing runtime.cjs" }
+          echo "bundle OK"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: prizma-admin-exe
+          path: admin/release/PRIZMA-Admin.exe
+          if-no-files-found: error
+
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: prizma-admin-exe
+          path: release-artifact
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          FILE="release-artifact/PRIZMA-Admin.exe"
+          if ! gh release create "$GITHUB_REF_NAME" "$FILE" \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "PRIZMA Admin $GITHUB_REF_NAME" \
+            --notes "Автосборка CI: exe автономный — сам ставит Python, зависимости, .env и БД."; then
+            gh release edit "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" \
+              --title "PRIZMA Admin $GITHUB_REF_NAME" --notes "Автосборка CI (обновлено)" \
+            && gh release upload "$GITHUB_REF_NAME" "$FILE" \
+              --repo "$GITHUB_REPOSITORY" --clobber
+          fi
+          echo "Release: https://github.com/$GITHUB_REPOSITORY/releases/tag/$GITHUB_REF_NAME"
