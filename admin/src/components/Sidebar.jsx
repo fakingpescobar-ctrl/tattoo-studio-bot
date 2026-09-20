@@ -1,7 +1,8 @@
-import { IconCalendar, IconImage, IconStar } from './icons.jsx';
+import { IconCalendar, IconCalendarGrid, IconImage, IconStar } from './icons.jsx';
 
 const NAV = [
   { id: 'bookings', label: 'Записи', Icon: IconCalendar },
+  { id: 'calendar', label: 'Календарь', Icon: IconCalendarGrid },
   { id: 'portfolio', label: 'Портфолио', Icon: IconImage },
   { id: 'reviews', label: 'Отзывы', Icon: IconStar },
 ];

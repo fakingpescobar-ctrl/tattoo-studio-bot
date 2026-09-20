@@ -143,6 +143,27 @@ if __name__ == "__main__":
     reminders_thread.start()
     logger.info("Reminders thread started (check every 10 min)")
 
+    # Фоновый поток обновления закреплённых календарей админа (при смене epoch)
+    def admin_cal_refresh_loop():
+        from handlers import refresh_admin_calendars, _admin_cal_msg
+        from database import _db_epoch
+        time.sleep(15)
+        last_epoch = _db_epoch()
+        while True:
+            try:
+                current_epoch = _db_epoch()
+                if current_epoch and current_epoch != last_epoch and _admin_cal_msg:
+                    refresh_admin_calendars()
+                    logger.info("Admin calendars refreshed (epoch change)")
+                    last_epoch = current_epoch
+            except Exception as e:
+                logger.error(f"Admin cal refresh error: {e}")
+            time.sleep(15)
+
+    admin_cal_thread = threading.Thread(target=admin_cal_refresh_loop, daemon=True)
+    admin_cal_thread.start()
+    logger.info("Admin calendar auto-refresh started (every 15s, epoch-based)")
+
     # infinity_polling с авто-восстановлением при сбое сети
     while True:
         try:

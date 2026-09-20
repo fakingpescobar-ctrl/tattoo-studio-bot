@@ -12,6 +12,7 @@ UI только читает/пишет через этот сервер. Бин
 Эндпоинты (все требуют заголовок Authorization: Bearer <token>):
   GET    /api/health                 — статус + текущая эпоха кэша
   GET    /api/stats                  — сводка для карточек статистики
+  GET    /api/calendar               — данные календаря (записи + блокировки по дням)
   GET    /api/bookings               — все записи (JOIN users), ?status=&search=
   POST   /api/bookings/{id}/status   — {"status": "..."} сменить статус
   DELETE /api/bookings/{id}          — удалить запись
@@ -24,10 +25,12 @@ UI только читает/пишет через этот сервер. Бин
   POST   /api/reviews/{id}/like      — лайк отзыву
   POST   /api/reviews/{id}/featured  —.toggle избранного
 """
+import json
 import os
 import secrets
 from pathlib import Path
 
+import requests as http_requests
 import uvicorn
 from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -36,12 +39,121 @@ from pydantic import BaseModel
 import psutil
 
 import media_bridge
-from config import DB_PATH
+from config import DB_PATH, BOT_TOKEN, BOT_HANDLE, MAX_TOKEN, MAX_BOT_HANDLE
 from database import (delete_booking, delete_portfolio_work, delete_review,
                       edit_review, get_all_bookings, get_booking_by_id,
-                      get_portfolio, get_rating_stats, get_review_by_id,
-                      get_reviews, get_services, like_review,
+                      get_blocked_slots, get_portfolio, get_rating_stats,
+                      get_review_by_id, get_reviews, get_services, like_review,
                       reply_to_review, toggle_featured, update_booking_status)
+
+
+# ── Уведомления клиентам (прямые HTTP-вызовы, т.к. admin_api работает отдельно от ботов) ──
+
+def _notify_cancelled_tg(user_id, booking_id, service, date_time):
+    """Telegram: отправить сообщение об отмене с кнопкой «Связаться с мастером»."""
+    if not BOT_TOKEN or not user_id:
+        return
+    keyboard = {"inline_keyboard": [
+        [{"text": "📞 Связаться с мастером", "url": f"https://t.me/{BOT_HANDLE}"}]
+    ]}
+    try:
+        http_requests.post(
+            f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
+            json={
+                "chat_id": user_id,
+                "text": (f"❌ Запись #{booking_id} ({service}) на {date_time} "
+                         f"отменена мастером.\n\n"
+                         f"Если хотите уточнить причину, нажмите кнопку ниже 👇"),
+                "reply_markup": keyboard,
+            },
+            timeout=10,
+        )
+    except Exception:
+        pass  # тихо — сеть может моргнуть
+
+
+def _notify_cancelled_max(user_id, booking_id, service, date_time):
+    """MAX: отправить сообщение об отмене с кнопкой «Связаться с мастером» (message → /start)."""
+    if not MAX_TOKEN or not user_id:
+        return
+    from max_client import MaxClient
+    try:
+        client = MaxClient(token=MAX_TOKEN)
+        contact_btn = [{"type": "callback", "text": "📞 Связаться с мастером",
+                        "payload": "contact_master"}]
+        client.send_message(
+            user_id,
+            text=(f"❌ Запись #{booking_id} ({service}) на {date_time} "
+                  f"отменена мастером.\n\n"
+                  f"Если хотите уточнить причину, нажмите кнопку ниже 👇"),
+            attachments=[{"type": "inline_keyboard", "payload": {"buttons": [contact_btn]}}],
+        )
+    except Exception:
+        pass
+
+
+def _notify_confirmed_tg(user_id, booking_id, date_time):
+    """Telegram: уведомить клиента о подтверждении записи."""
+    if not BOT_TOKEN or not user_id:
+        return
+    try:
+        http_requests.post(
+            f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
+            json={
+                "chat_id": user_id,
+                "text": f"✅ Запись #{booking_id} на {date_time} подтверждена мастером!",
+            },
+            timeout=10,
+        )
+    except Exception:
+        pass
+
+
+def _notify_confirmed_max(user_id, booking_id, date_time):
+    """MAX: уведомить клиента о подтверждении записи."""
+    if not MAX_TOKEN or not user_id:
+        return
+    from max_client import MaxClient
+    try:
+        client = MaxClient(token=MAX_TOKEN)
+        client.send_message(
+            user_id,
+            text=f"✅ Запись #{booking_id} на {date_time} подтверждена мастером!",
+        )
+    except Exception:
+        pass
+
+
+def _notify_completed_tg(user_id, booking_id):
+    """Telegram: уведомить клиента о завершении сеанса + просьба оставить отзыв."""
+    if not BOT_TOKEN or not user_id:
+        return
+    try:
+        http_requests.post(
+            f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
+            json={
+                "chat_id": user_id,
+                "text": f"✨ Сеанс #{booking_id} завершён! Оставьте отзыв в меню «⭐ Отзывы».",
+            },
+            timeout=10,
+        )
+    except Exception:
+        pass
+
+
+def _notify_completed_max(user_id, booking_id):
+    """MAX: уведомить клиента о завершении сеанса + просьба оставить отзыв."""
+    if not MAX_TOKEN or not user_id:
+        return
+    from max_client import MaxClient
+    try:
+        client = MaxClient(token=MAX_TOKEN)
+        client.send_message(
+            user_id,
+            text=f"✨ Сеанс #{booking_id} завершён! Оставьте отзыв в меню «⭐ Отзывы».",
+        )
+    except Exception:
+        pass
 
 # Порт зашит с двух сторон (здесь и в admin/src/api.js) НАРОЧНО: один
 # источник конфигурации меньше, чем рассинхрон env-оверрайдов.
@@ -153,6 +265,63 @@ def stats(_: None = Depends(require_auth)):
     }
 
 
+@app.get('/api/calendar')
+def calendar(year: int = 0, month: int = 0, _: None = Depends(require_auth)):
+    """Данные для календаря: записи и блокировки по дням.
+
+    Возвращает для каждого дня месяца:
+      - bookings: список активных записей (pending/confirmed)
+      - blocked_hours: список заблокированных часов (int)
+    year/month — год и месяц (1-12). Если не переданы — текущий месяц.
+    """
+    from datetime import datetime as _dt
+    now = _dt.now()
+    y = year or now.year
+    m = month or now.month
+
+    # Активные записи на месяц
+    active_statuses = {'pending', 'confirmed'}
+    by_day = {}  # day -> [{id, user_id, username, first_name, service, date_time, status}]
+    for b in get_all_bookings():
+        try:
+            dt = _dt.strptime(b['date_time'].strip(), '%d.%m.%Y %H:%M')
+        except Exception:
+            continue
+        if dt.year == y and dt.month == m and b['status'] in active_statuses:
+            day = dt.day
+            by_day.setdefault(day, []).append({
+                'id': b['id'],
+                'user_id': b['user_id'],
+                'username': b['username'],
+                'first_name': b['first_name'],
+                'service': b['service'],
+                'date_time': b['date_time'],
+                'status': b['status'],
+            })
+
+    # Блокировки на месяц
+    blocked_by_day = {}  # day -> [10, 11, 14, ...]
+    month_prefix = f'{y}-{m:02d}'
+    for slot in get_blocked_slots():
+        # slot format: "YYYY-MM-DD HH:00"
+        if not slot.startswith(month_prefix):
+            continue
+        try:
+            parts = slot.split(' ')[0].split('-')  # ['YYYY', 'MM', 'DD']
+            day = int(parts[2])
+            hour = int(slot.split(' ')[1].split(':')[0])
+            blocked_by_day.setdefault(day, []).append(hour)
+        except Exception:
+            continue
+
+    return {
+        'year': y,
+        'month': m,
+        'days': by_day,
+        'blocked': blocked_by_day,
+    }
+
+
 @app.get('/api/bookings')
 def bookings(status: str = '', search: str = '', _: None = Depends(require_auth)):
     rows = [dict(r) for r in get_all_bookings()]
@@ -182,13 +351,43 @@ def change_status(booking_id: int, body: StatusBody, _: None = Depends(require_a
     if row is None:
         raise HTTPException(status_code=404, detail='Booking not found')
     update_booking_status(booking_id, body.status)
+    # Уведомляем клиента при смене статуса
+    if row['user_id']:
+        platform = row.get('platform', 'telegram')
+        if body.status == 'cancelled':
+            if platform == 'max':
+                _notify_cancelled_max(row['user_id'], booking_id,
+                                      row['service'], row['date_time'])
+            else:
+                _notify_cancelled_tg(row['user_id'], booking_id,
+                                     row['service'], row['date_time'])
+        elif body.status == 'confirmed':
+            if platform == 'max':
+                _notify_confirmed_max(row['user_id'], booking_id, row['date_time'])
+            else:
+                _notify_confirmed_tg(row['user_id'], booking_id, row['date_time'])
+        elif body.status == 'completed':
+            if platform == 'max':
+                _notify_completed_max(row['user_id'], booking_id)
+            else:
+                _notify_completed_tg(row['user_id'], booking_id)
     return {'ok': True, 'id': booking_id, 'status': body.status}
 
 
 @app.delete('/api/bookings/{booking_id}')
 def remove_booking(booking_id: int, _: None = Depends(require_auth)):
-    if get_booking_by_id(booking_id) is None:
+    row = get_booking_by_id(booking_id)
+    if row is None:
         raise HTTPException(status_code=404, detail='Booking not found')
+    # Уведомляем клиента перед удалением
+    if row['user_id']:
+        platform = row.get('platform', 'telegram')
+        if platform == 'max':
+            _notify_cancelled_max(row['user_id'], booking_id,
+                                  row['service'], row['date_time'])
+        else:
+            _notify_cancelled_tg(row['user_id'], booking_id,
+                                 row['service'], row['date_time'])
     delete_booking(booking_id)
     return {'ok': True}
 

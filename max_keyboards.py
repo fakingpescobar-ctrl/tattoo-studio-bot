@@ -29,13 +29,21 @@ def _link(text, url):
 # ============ ГЛАВНОЕ МЕНЮ ============
 
 def get_main_menu(is_admin=False):
-    rows = [
-        [_cb("🎨 Портфолио", "portfolio"), _cb("📅 Записаться", "booking_start")],
-        [_cb("💰 Прайс-лист", "price"), _cb("⭐ Отзывы", "reviews")],
-        [_cb("👤 Мои записи", "my_bookings"), _cb("ℹ️ О мастере", "about")],
-    ]
     if is_admin:
-        rows.append([_cb("🔧 Админ-панель", "admin")])
+        # Админ видит ТОЛЬКО свои функции — без портфолио/прайса/записи
+        rows = [
+            [_cb("📋 Все записи", "admin_bookings"),
+             _cb("➕ Добавить работу", "admin_add_work")],
+            [_cb("🗑 Управление портфолио", "admin_portfolio"),
+             _cb("🚫 Блокировка слотов", "admin_slots")],
+            [_cb("⭐ Отзывы", "reviews")],
+        ]
+    else:
+        rows = [
+            [_cb("🎨 Портфолио", "portfolio"), _cb("📅 Записаться", "booking_start")],
+            [_cb("💰 Прайс-лист", "price"), _cb("⭐ Отзывы", "reviews")],
+            [_cb("👤 Мои записи", "my_bookings"), _cb("ℹ️ О мастере", "about")],
+        ]
     return kb(rows)
 
 
@@ -183,6 +191,86 @@ def get_admin_time_keyboard(year, month, day, blocked_slots=None):
     return kb(rows)
 
 
+def get_admin_dashboard_calendar(year, month, bookings=None, blocked_slots=None):
+    """Календарь-дашборд для админа: показывает записи и заблокированные дни.
+
+    Маркеры дней:
+      🔴 — есть активные записи (pending/confirmed)
+      ⬛ — все слоты заблокированы
+      (число) — свободные дни
+    """
+    bookings = bookings or []
+    blocked_slots = blocked_slots or []
+
+    from datetime import datetime as _dt
+
+    booked_days = set()
+    blocked_days = set()
+
+    for b in bookings:
+        if b['status'] in ('pending', 'confirmed'):
+            try:
+                dt = _dt.strptime(b['date_time'].strip(), "%d.%m.%Y %H:%M")
+                booked_days.add(dt.day)
+            except (ValueError, TypeError):
+                pass
+
+    blocked_by_day = {}
+    for slot in blocked_slots:
+        try:
+            day = int(slot.split('-')[2].split()[0])
+            blocked_by_day[day] = blocked_by_day.get(day, 0) + 1
+        except (ValueError, IndexError):
+            pass
+    for day, count in blocked_by_day.items():
+        if count >= 11:
+            blocked_days.add(day)
+
+    today = _dt.now().date()
+
+    rows = []
+    rows.append([_cb(f"📅 {MONTHS_RU[month]} {year}", "ignore")])
+    rows.append([_cb(d, "ignore") for d in WEEKDAYS_RU])
+
+    cal = calendar.monthcalendar(year, month)
+    for week in cal:
+        row = []
+        for day in week:
+            if day == 0:
+                row.append(_ign())
+            else:
+                day_date = _dt(year, month, day).date()
+                if day_date < today:
+                    row.append(_cb("·", "ignore"))
+                elif day in blocked_days:
+                    row.append(_cb("⬛", "ignore"))
+                elif day in booked_days:
+                    row.append(_cb(f"🔴{day}", f"admin_dash_day_{year}_{month}_{day}"))
+                else:
+                    row.append(_cb(str(day), f"admin_dash_day_{year}_{month}_{day}"))
+        rows.append(row)
+
+    prev_m = month - 1 or 12
+    prev_y = year - 1 if month == 1 else year
+    next_m = month + 1 if month < 12 else 1
+    next_y = year + 1 if month == 12 else year
+
+    rows.append([
+        _cb("◀️", f"admin_dash_cal_{prev_y}_{prev_m}"),
+        _cb("📋 В записи", "admin_bookings"),
+        _cb("▶️", f"admin_dash_cal_{next_y}_{next_m}"),
+    ])
+    rows.append([
+        _cb("🚫 Блокировка", "admin_slots"),
+        _cb("➕ Работа", "admin_add_work"),
+        _cb("⭐ Отзывы", "reviews"),
+    ])
+    rows.append([
+        _cb("🔧 В админку", "admin"),
+    ])
+    return kb(rows)
+
+
 def get_about_keyboard():
     """Кнопки контактов в разделе О мастере"""
     from config import BOT_VK_LABEL, BOT_VK_URL
@@ -200,11 +288,15 @@ def get_rating_keyboard():
     return kb(rows)
 
 
-def get_reviews_keyboard():
-    return kb([
-        [_cb("✍️ Оставить отзыв", "add_review")],
-        [_cb("◀️ В меню", "menu")],
-    ])
+def get_reviews_keyboard(is_admin=False, reviews=None):
+    rows = []
+    if is_admin and reviews:
+        for r in reviews:
+            label = f"💬 Ответить на #{r['id']}" if not r['admin_reply'] else f"✅ #{r['id']} (отвечен)"
+            rows.append([_cb(label, f"admin_reply_review_{r['id']}")])
+    rows.append([_cb("✍️ Оставить отзыв", "add_review")])
+    rows.append([_cb("◀️ В меню", "menu")])
+    return kb(rows)
 
 
 # ============ АДМИН ============
@@ -258,6 +350,11 @@ def get_admin_booking_actions(booking_id, status=None):
     ])
     rows.append([_cb("◀️ Назад", "admin_bookings")])
     return kb(rows)
+
+
+def get_contact_master_keyboard():
+    """Кнопка «Связаться с мастером» — callback, открывает меню бота."""
+    return kb([[{"type": "callback", "text": "📞 Связаться с мастером", "payload": "contact_master"}]])
 
 
 def get_admin_portfolio_keyboard(works):

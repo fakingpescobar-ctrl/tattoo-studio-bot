@@ -48,6 +48,43 @@ logger = logging.getLogger(__name__)
 
 # Rate-limiting будет передан через параметры при регистрации
 
+# ── Кэш закреплённых календарей (chat_id → message_id) ──────────────────────
+# Админ видит календарь-дашборд всегда вверху чата (pinned).
+_admin_cal_msg: dict[int, int] = {}
+
+def _admin_send_or_edit_calendar(chat_id: int):
+    """Отправить или обновить закреплённый календарь-дашборд для админа."""
+    now_date = datetime.now()
+    bookings = get_all_bookings()
+    blocked = get_blocked_slots()
+    text = (f"🔧 <b>Панель управления</b>\n\n"
+            f"🔴 — есть записи  ⬛ — заблокировано\n"
+            f"Обновляется автоматически 👇")
+    markup = get_admin_dashboard_calendar(
+        now_date.year, now_date.month, bookings, blocked)
+    msg_id = _admin_cal_msg.get(chat_id)
+    if msg_id:
+        try:
+            bot.edit_message_text(text, chat_id, msg_id, reply_markup=markup)
+            return
+        except Exception:
+            pass
+    # Отправляем новое + закрепляем
+    sent = bot.send_message(chat_id, text, reply_markup=markup)
+    _admin_cal_msg[chat_id] = sent.message_id
+    try:
+        bot.pin_chat_message(chat_id, sent.message_id, disable_notification=True)
+    except Exception as e:
+        logger.warning(f"pin failed: {e}")
+
+def refresh_admin_calendars():
+    """Обновить все закреплённые календари (вызывается при epoch change)."""
+    for chat_id, msg_id in list(_admin_cal_msg.items()):
+        try:
+            _admin_send_or_edit_calendar(chat_id)
+        except Exception:
+            pass
+
 def is_admin(user_id):
     return user_id in ADMIN_IDS
 
@@ -83,19 +120,27 @@ def register_callbacks(bot, user_commands, rate_limit_window, rate_limit_count, 
         save_user(user.id, user.username, user.first_name, user.last_name)
         database.clear_state(user.id)
 
-        avg, cnt = get_rating_stats()
-        rating_line = f"⭐ Рейтинг: {avg:.1f} ({cnt} отзывов)" if cnt else "⭐ Будь первым!"
+        if is_admin(user.id):
+            # Админ: закреплённый календарь-дашборд + меню внизу
+            _admin_send_or_edit_calendar(message.chat.id)
+            bot.send_message(message.chat.id,
+                f"👋 Привет, {user.first_name}!",
+                reply_markup=get_main_menu(is_admin(user.id)))
+        else:
+            # Обычный пользователь
+            avg, cnt = get_rating_stats()
+            rating_line = f"⭐ Рейтинг: {avg:.1f} ({cnt} отзывов)" if cnt else "⭐ Будь первым!"
 
-        welcome = (f"👋 Привет, {user.first_name}!\n\n"
-                    f"Я тату-мастер <b>Максим Андреевич</b>. Добро пожаловать! 🎨\n\n"
-                    f"Здесь ты можешь:\n"
-                    f"• 🎨 Посмотреть портфолио работ\n"
-                    f"• 📅 Записаться на татуировку\n"
-                    f"• 💰 Узнать цены\n"
-                    f"• ⭐ Читать и оставлять отзывы\n"
-                    f"• 👤 Управлять своими записями\n\n"
-                    f"{rating_line}\n\nВыбери нужный раздел 👇")
-        bot.send_message(message.chat.id, welcome, reply_markup=get_main_menu(is_admin(user.id)))
+            welcome = (f"👋 Привет, {user.first_name}!\n\n"
+                        f"Я тату-мастер <b>Максим Андреевич</b>. Добро пожаловать! 🎨\n\n"
+                        f"Здесь ты можешь:\n"
+                        f"• 🎨 Посмотреть портфолио работ\n"
+                        f"• 📅 Записаться на татуировку\n"
+                        f"• 💰 Узнать цены\n"
+                        f"• ⭐ Читать и оставлять отзывы\n"
+                        f"• 👤 Управлять своими записями\n\n"
+                        f"{rating_line}\n\nВыбери нужный раздел 👇")
+            bot.send_message(message.chat.id, welcome, reply_markup=get_main_menu(is_admin(user.id)))
 
     @bot.callback_query_handler(func=lambda c: True)
     @timing
@@ -106,19 +151,34 @@ def register_callbacks(bot, user_commands, rate_limit_window, rate_limit_count, 
         try:
             if data == "menu":
                 database.clear_state(user_id)
-                try:
-                    bot.edit_message_text("🎨 <b>Главное меню</b>\n\nВыбери раздел:",
-                                        call.message.chat.id, call.message.message_id,
-                                        reply_markup=get_main_menu(is_admin(user_id)))
-                except Exception:
-                    # Не удалось отредактировать (фото-сообщение) — удаляем старое и шлём новое
+                if is_admin(user_id):
+                    # Админ: обновить закреплённый календарь + показать меню внизу
+                    _admin_send_or_edit_calendar(call.message.chat.id)
                     try:
-                        bot.delete_message(call.message.chat.id, call.message.message_id)
+                        bot.edit_message_text("🔧 <b>Панель управления</b> 👇",
+                            call.message.chat.id, call.message.message_id,
+                            reply_markup=get_main_menu(is_admin(user_id)))
                     except Exception:
-                        pass
-                    bot.send_message(call.message.chat.id,
-                                     "🎨 <b>Главное меню</b>\n\nВыбери раздел:",
-                                     reply_markup=get_main_menu(is_admin(user_id)))
+                        try:
+                            bot.delete_message(call.message.chat.id, call.message.message_id)
+                        except Exception:
+                            pass
+                        bot.send_message(call.message.chat.id,
+                            "🔧 <b>Панель управления</b> 👇",
+                            reply_markup=get_main_menu(is_admin(user_id)))
+                else:
+                    try:
+                        bot.edit_message_text("🎨 <b>Главное меню</b>\n\nВыбери раздел:",
+                                            call.message.chat.id, call.message.message_id,
+                                            reply_markup=get_main_menu(is_admin(user_id)))
+                    except Exception:
+                        try:
+                            bot.delete_message(call.message.chat.id, call.message.message_id)
+                        except Exception:
+                            pass
+                        bot.send_message(call.message.chat.id,
+                                         "🎨 <b>Главное меню</b>\n\nВыбери раздел:",
+                                         reply_markup=get_main_menu(is_admin(user_id)))
             elif data == "portfolio":
                 show_portfolio(call)
             elif data.startswith("port_"):
@@ -235,6 +295,70 @@ def register_callbacks(bot, user_commands, rate_limit_window, rate_limit_count, 
                 blocked = get_blocked_slots()
                 bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id,
                                             reply_markup=get_admin_time_keyboard(y, m, d, blocked))
+            elif data.startswith("admin_dash_cal_"):
+                # Навигация по календарю-дашборду — обновляем закреплённый
+                parts = data.split("_")
+                y, m = int(parts[3]), int(parts[4])
+                bookings = get_all_bookings()
+                blocked = get_blocked_slots()
+                now_date = datetime.now()
+                text = (f"🔧 <b>Панель управления</b>\n\n"
+                        f"🔴 — есть записи  ⬛ — заблокировано\n"
+                        f"Обновляется автоматически 👇")
+                markup = get_admin_dashboard_calendar(y, m, bookings, blocked)
+                # Обновляем именно закреплённое сообщение
+                cal_msg_id = _admin_cal_msg.get(call.message.chat.id)
+                if cal_msg_id:
+                    try:
+                        bot.edit_message_text(text, call.message.chat.id, cal_msg_id,
+                                              reply_markup=markup)
+                        bot.answer_callback_query(call.id)
+                        return
+                    except Exception:
+                        pass
+                # Фоллбэк: если по какой-то причине нет закреплённого — edit текущего
+                try:
+                    bot.edit_message_text(text, call.message.chat.id,
+                        call.message.message_id, reply_markup=markup)
+                except Exception:
+                    try:
+                        bot.delete_message(call.message.chat.id, call.message.message_id)
+                    except Exception:
+                        pass
+                    _admin_send_or_edit_calendar(call.message.chat.id)
+                bot.answer_callback_query(call.id)
+            elif data.startswith("admin_dash_day_"):
+                # Клик по дню в календаре-дашборде — показать записи дня
+                parts = data.split("_")
+                y, m, d = int(parts[3]), int(parts[4]), int(parts[5])
+                day_bookings = [
+                    b for b in get_all_bookings()
+                    if b['status'] in ('pending', 'confirmed')
+                    and b['date_time'] and b['date_time'].strip().startswith(f"{d:02d}.{m:02d}.{y}")
+                ]
+                if day_bookings:
+                    lines = [f"📋 <b>Записи на {d:02d}.{m:02d}.{y}:</b>\n"]
+                    for b in day_bookings:
+                        status_icon = "🟡" if b['status'] == 'pending' else "🟢"
+                        lines.append(f"{status_icon} #{b['id']} {b['date_time'][11:16]} — {b['first_name'] or 'Клиент'} ({b['service']})")
+                    lines.append("\nНажмите на запись для действий 👇")
+                    text = "\n".join(lines)
+                    markup = types.InlineKeyboardMarkup()
+                    for b in day_bookings:
+                        status_icon = "🟡" if b['status'] == 'pending' else "🟢"
+                        markup.add(types.InlineKeyboardButton(
+                            f"{status_icon} #{b['id']} {b['date_time'][11:16]} — {b['first_name'] or 'Клиент'}",
+                            callback_data=f"admin_booking_{b['id']}"))
+                    markup.add(types.InlineKeyboardButton("◀️ Назад", callback_data=f"admin_dash_cal_{y}_{m}"))
+                    bot.edit_message_text(text, call.message.chat.id, call.message.message_id,
+                                          reply_markup=markup)
+                else:
+                    markup = types.InlineKeyboardMarkup()
+                    markup.add(types.InlineKeyboardButton("◀️ Назад", callback_data=f"admin_dash_cal_{y}_{m}"))
+                    bot.edit_message_text(
+                        f"📋 Записей на {d:02d}.{m:02d}.{y} нет.",
+                        call.message.chat.id, call.message.message_id,
+                        reply_markup=markup)
             elif data.startswith("admin_reply_review_"):
                 review_id = int(data.split("_")[3])
                 save_state(user_id, 'admin_review_reply', {'review_id': review_id})
@@ -338,13 +462,14 @@ def register_callbacks(bot, user_commands, rate_limit_window, rate_limit_count, 
         body = ""
         for r in reviews[:10]:
             body += f"{'⭐' * r['rating']}\n💬 {r['text']}\n— @{r['username'] or 'Аноним'}"
-            if r.get('admin_reply'):
+            if r['admin_reply']:
                 body += f"\n\n💬 <b>Ответ мастера:</b> {r['admin_reply']}"
-            if r.get('likes'):
+            if r['likes']:
                 body += f"\n❤️ {r['likes']}"
             body += "\n\n"
+        is_adm = is_admin(call.from_user.id)
         bot.edit_message_text(header + body, call.message.chat.id, call.message.message_id,
-                              reply_markup=get_reviews_keyboard())
+                              reply_markup=get_reviews_keyboard(is_admin=is_adm, reviews=reviews[:10] if is_adm else None))
 
     def show_my_bookings(call):
         bookings = get_user_bookings(call.from_user.id)
@@ -387,6 +512,10 @@ def register_callbacks(bot, user_commands, rate_limit_window, rate_limit_count, 
         if b['status'] not in ('pending', 'confirmed'):
             bot.answer_callback_query(call.id, "Эту запись уже нельзя отменить", show_alert=True)
             return
+        # Освобождаем слот при отмене клиентом
+        b_slot_key = booking_to_slot_key(b['date_time'])
+        if b_slot_key and is_slot_blocked(b_slot_key):
+            unblock_slot(b_slot_key)
         update_booking_status(booking_id, 'client_cancelled')
         user = call.from_user
         notify_admin(f"🚫 <b>Клиент отказался от записи #{booking_id}!</b>\n\n"
@@ -557,8 +686,14 @@ def register_callbacks(bot, user_commands, rate_limit_window, rate_limit_count, 
             if slot_key and is_slot_blocked(slot_key):
                 unblock_slot(slot_key)
             delete_booking(booking_id)
-            bot.send_message(b['user_id'], f"❌ Запись #{booking_id} на {b['date_time']} отменена мастером.")
+            bot.send_message(b['user_id'],
+                f"❌ Запись #{booking_id} на {b['date_time']} отменена мастером.\n\n"
+                f"Если хотите уточнить причину, нажмите кнопку ниже 👇",
+                reply_markup=get_contact_master_keyboard())
             bot.answer_callback_query(call.id, "Отменено и удалено", show_alert=True)
+            # Возвращаем админа в список записей
+            admin_show_bookings(call)
+            threading.Thread(target=refresh_overlay_async, daemon=True).start()
             return
         elif action == "msg":
             save_state(call.from_user.id, 'admin_msg', {'target': b['user_id'], 'booking_id': booking_id})

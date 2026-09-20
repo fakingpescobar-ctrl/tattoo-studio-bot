@@ -48,3 +48,6 @@ export const IconHeart = ({ size = 14, filled = false }) => (
 export const IconShare = ({ size = 14 }) => (
   <svg {...base} width={size} height={size}><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="m8.59 13.51 6.83 3.98M15.41 6.51l-6.82 3.98"/></svg>
 );
+export const IconCalendarGrid = () => (
+  <svg {...base}><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M3 15h18M9 3v18M15 3v18"/></svg>
+);

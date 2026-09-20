@@ -4,12 +4,13 @@ import { useToast } from './components/Toast.jsx';
 import Sidebar from './components/Sidebar.jsx';
 import StatCards from './components/StatCards.jsx';
 import BookingsView from './components/BookingsView.jsx';
+import CalendarView from './components/CalendarView.jsx';
 import PortfolioView from './components/PortfolioView.jsx';
 import ReviewsView from './components/ReviewsView.jsx';
 import EmptyState from './components/EmptyState.jsx';
 import { IconRefresh, IconSearch } from './components/icons.jsx';
 
-const VIEW_TITLES = { bookings: 'Записи', portfolio: 'Портфолио', reviews: 'Отзывы' };
+const VIEW_TITLES = { bookings: 'Записи', calendar: 'Календарь', portfolio: 'Портфолио', reviews: 'Отзывы' };
 
 export default function App() {
   const [view, setView] = useState('bookings');
@@ -97,6 +98,7 @@ export default function App() {
                   <BookingsView bookings={bookings} search={search} onChanged={() => loadAll({ silent: true })} />
                 </>
               )}
+              {view === 'calendar' && <CalendarView />}
               {view === 'portfolio' && <PortfolioView works={works} onChanged={() => loadAll({ silent: true })} />}
               {view === 'reviews' && <ReviewsView reviews={reviews} onChanged={() => loadAll({ silent: true })} />}
             </>

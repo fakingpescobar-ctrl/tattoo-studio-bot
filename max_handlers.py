@@ -319,19 +319,33 @@ class MaxBot:
         save_user(user_id, user.get('username'), user.get('first_name', ''),
                   user.get('last_name', ''))
         clear_state(user_id)
-        avg, cnt = get_rating_stats()
-        rating_line = f"⭐ Рейтинг: {avg:.1f} ({cnt} отзывов)" if cnt else "⭐ Будь первым!"
-        # Текст 1:1 как в TG /start (handlers.py), чтобы оба бота выглядели одинаково.
-        welcome = (f"👋 Привет, {user.get('first_name', '')}!\n\n"
-                   f"Я тату-мастер <b>Максим Андреевич</b>. Добро пожаловать! 🎨\n\n"
-                   f"Здесь ты можешь:\n"
-                   f"• 🎨 Посмотреть портфолио работ\n"
-                   f"• 📅 Записаться на татуировку\n"
-                   f"• 💰 Узнать цены\n"
-                   f"• ⭐ Читать и оставлять отзывы\n"
-                   f"• 👤 Управлять своими записями\n\n"
-                   f"{rating_line}\n\nВыбери нужный раздел 👇")
-        self.client.send_message(chat_id, welcome, attachments=get_main_menu(is_admin(user_id)))
+
+        if is_admin(user_id):
+            # Админ: приветствие + календарь-дашборд
+            from datetime import datetime as _dt
+            now_date = _dt.now()
+            bookings = get_all_bookings()
+            blocked = get_blocked_slots()
+            text = (f"🔧 <b>Панель управления</b>\n\n"
+                    f"Привет, {user.get('first_name', '')}!\n"
+                    f"🔴 — есть записи  ⬛ — заблокировано\n"
+                    f"Выберите день или действие 👇")
+            self.client.send_message(chat_id, text,
+                attachments=get_admin_dashboard_calendar(
+                    now_date.year, now_date.month, bookings, blocked))
+        else:
+            avg, cnt = get_rating_stats()
+            rating_line = f"⭐ Рейтинг: {avg:.1f} ({cnt} отзывов)" if cnt else "⭐ Будь первым!"
+            welcome = (f"👋 Привет, {user.get('first_name', '')}!\n\n"
+                       f"Я тату-мастер <b>Максим Андреевич</b>. Добро пожаловать! 🎨\n\n"
+                       f"Здесь ты можешь:\n"
+                       f"• 🎨 Посмотреть портфолио работ\n"
+                       f"• 📅 Записаться на татуировку\n"
+                       f"• 💰 Узнать цены\n"
+                       f"• ⭐ Читать и оставлять отзывы\n"
+                       f"• 👤 Управлять своими записями\n\n"
+                       f"{rating_line}\n\nВыбери нужный раздел 👇")
+            self.client.send_message(chat_id, welcome, attachments=get_main_menu(is_admin(user_id)))
 
     @timing
     def cmd_start(self, user_id, chat_id, user):
@@ -354,11 +368,29 @@ class MaxBot:
         try:
             if data == "ignore":
                 self.client.answer_callback(callback_id)
-            elif data == "menu":
+            elif data == "contact_master":
                 clear_state(user_id)
                 self.client.callback_reply(callback_id,
-                    text="🎨 <b>Главное меню</b>\n\nВыбери раздел:",
+                    text="📞 <b>Связаться с мастером</b>\n\nНапишите ваше сообщение — мастер ответит в ближайшее время!",
                     attachments=get_main_menu(is_admin(user_id)))
+            elif data == "menu":
+                clear_state(user_id)
+                if is_admin(user_id):
+                    # Админ: календарь-дашборд
+                    from datetime import datetime as _dt
+                    now_date = _dt.now()
+                    bookings = get_all_bookings()
+                    blocked = get_blocked_slots()
+                    text = (f"🔧 <b>Панель управления</b>\n\n"
+                            f"🔴 — есть записи  ⬛ — заблокировано\n"
+                            f"Выберите день или действие 👇")
+                    self.client.callback_reply(callback_id, text=text,
+                        attachments=get_admin_dashboard_calendar(
+                            now_date.year, now_date.month, bookings, blocked))
+                else:
+                    self.client.callback_reply(callback_id,
+                        text="🎨 <b>Главное меню</b>\n\nВыбери раздел:",
+                        attachments=get_main_menu(is_admin(user_id)))
             elif data == "portfolio":
                 self.show_portfolio(callback_id, user_id, 0)
             elif data.startswith("port_"):
@@ -368,7 +400,7 @@ class MaxBot:
             elif data == "about":
                 self.show_about(callback_id)
             elif data == "reviews":
-                self.show_reviews(callback_id)
+                self.show_reviews(callback_id, user_id=user_id)
             elif data == "add_review":
                 save_state(user_id, 'review_rating')
                 self.client.callback_reply(callback_id,
@@ -443,6 +475,17 @@ class MaxBot:
                 parts = data.split("_")
                 self.client.callback_reply(callback_id,
                     attachments=get_admin_calendar_keyboard(int(parts[3]), int(parts[4])))
+            elif data.startswith("admin_dash_cal_"):
+                # Навигация по календарю-дашборду админа
+                parts = data.split("_")
+                y, m = int(parts[3]), int(parts[4])
+                bookings = get_all_bookings()
+                blocked = get_blocked_slots()
+                text = (f"🔧 <b>Панель управления</b>\n\n"
+                        f"🔴 — есть записи  ⬛ — заблокировано\n"
+                        f"Выберите день или действие 👇")
+                self.client.callback_reply(callback_id, text=text,
+                    attachments=get_admin_dashboard_calendar(y, m, bookings, blocked))
             elif data == "admin_cal_back":
                 now = datetime.now()
                 self.client.callback_reply(callback_id,
@@ -456,6 +499,33 @@ class MaxBot:
                          f"Свободное время — нажмите, чтобы заблокировать.\n"
                          f"🔒 — уже заблокировано.",
                     attachments=get_admin_time_keyboard(y, m, d, blocked))
+            elif data.startswith("admin_dash_day_"):
+                # Клик по дню в календаре-дашборде — показать записи дня
+                parts = data.split("_")
+                y, m, d = int(parts[3]), int(parts[4]), int(parts[5])
+                day_bookings = [
+                    b for b in get_all_bookings()
+                    if b['status'] in ('pending', 'confirmed')
+                    and b['date_time'] and b['date_time'].strip().startswith(f"{d:02d}.{m:02d}.{y}")
+                ]
+                if day_bookings:
+                    lines = [f"📋 <b>Записи на {d:02d}.{m:02d}.{y}:</b>\n"]
+                    for b in day_bookings:
+                        status_icon = "🟡" if b['status'] == 'pending' else "🟢"
+                        lines.append(f"{status_icon} #{b['id']} {b['date_time'][11:16]} — {b['first_name'] or 'Клиент'} ({b['service']})")
+                    lines.append("\nНажмите на запись для действий 👇")
+                    text = "\n".join(lines)
+                    from max_keyboards import _cb, kb as _kb
+                    rows = []
+                    for b in day_bookings:
+                        status_icon = "🟡" if b['status'] == 'pending' else "🟢"
+                        rows.append([_cb(f"{status_icon} #{b['id']} {b['date_time'][11:16]} — {b['first_name'] or 'Клиент'}", f"admin_booking_{b['id']}")])
+                    rows.append([_cb("◀️ Назад", f"admin_dash_cal_{y}_{m}")])
+                    self.client.callback_reply(callback_id, text=text, attachments=_kb(rows))
+                else:
+                    self.client.callback_reply(callback_id,
+                        text=f"📋 Записей на {d:02d}.{m:02d}.{y} нет.",
+                        attachments=_kb([[_cb("◀️ Назад", f"admin_dash_cal_{y}_{m}")]]))
             elif data.startswith("admin_cal_time_"):
                 parts = data.split("_")
                 y, m, d, h = int(parts[3]), int(parts[4]), int(parts[5]), int(parts[6])
@@ -542,7 +612,7 @@ class MaxBot:
         text = (f"ℹ️ <b>О мастере</b>\n\nПриветствую любителей искусства тела и тех, кто мечтает выразить себя через татуировку! 🎨\n\nВоплощаю ваши самые смелые идеи в реальность ✨\n\n<b>Что я предлагаю:</b>\n✔️ <b>Индивидуальный дизайн</b> — создаю эскизы специально для вас\n✔️ <b>Высококачественные материалы</b> — только проверенные краски и инструменты\n✔️ <b>Комфортная атмосфера</b> — стерильно, уютно, дружелюбно\n\nЗапишитесь на консультацию прямо сейчас! 🔥\n\n<b>📍 Адрес:</b> {BOT_ADDRESS}\n<b>📞 Телефон:</b> {BOT_PHONE}\n<b>🌐 {BOT_VK_LABEL}:</b> {BOT_VK_URL}")
         self.client.callback_reply(callback_id, text=text, attachments=get_about_keyboard())
 
-    def show_reviews(self, callback_id):
+    def show_reviews(self, callback_id, user_id=None):
         reviews = get_reviews()
         avg, cnt = get_rating_stats()
         if cnt:
@@ -552,12 +622,14 @@ class MaxBot:
         body = ""
         for r in reviews[:10]:
             body += f"{'⭐' * r['rating']}\n💬 {r['text']}\n— @{r['username'] or 'Аноним'}"
-            if r.get('admin_reply'):
+            if r['admin_reply']:
                 body += f"\n\n💬 <b>Ответ мастера:</b> {r['admin_reply']}"
-            if r.get('likes'):
+            if r['likes']:
                 body += f"\n❤️ {r['likes']}"
             body += "\n\n"
-        self.client.callback_reply(callback_id, text=header + body, attachments=get_reviews_keyboard())
+        is_adm = user_id and is_admin(user_id)
+        markup = get_reviews_keyboard(is_admin=is_adm, reviews=reviews[:10] if is_adm else None)
+        self.client.callback_reply(callback_id, text=header + body, attachments=markup)
 
     def show_my_bookings(self, callback_id, user_id):
         bookings = get_user_bookings(user_id)
@@ -598,6 +670,10 @@ class MaxBot:
         if b['status'] not in ('pending', 'confirmed'):
             self.client.callback_reply(callback_id, text="Эту запись уже нельзя отменить")
             return
+        # Освобождаем слот при отмене клиентом
+        b_slot_key = booking_to_slot_key(b['date_time'])
+        if b_slot_key and is_slot_blocked(b_slot_key):
+            unblock_slot(b_slot_key)
         update_booking_status(booking_id, 'client_cancelled')
         u = get_user_by_id(user_id)
         uname = f"@{u['username']}" if u and u['username'] else f"ID:{user_id}"
@@ -776,7 +852,9 @@ class MaxBot:
             delete_booking(booking_id)
             try:
                 self.client.send_message(b['user_id'],
-                    f"❌ Запись #{booking_id} на {b['date_time']} отменена мастером.")
+                    f"❌ Запись #{booking_id} на {b['date_time']} отменена мастером.\n\n"
+                    f"Если хотите уточнить причину, нажмите кнопку ниже 👇",
+                    attachments=get_contact_master_keyboard())
             except Exception as e:
                 logger.warning(f"cancel notify failed: {e}")
             self.admin_show_bookings(callback_id, user_id)

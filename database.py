@@ -424,7 +424,10 @@ def get_booking_by_id(booking_id):
            WHERE b.id = ?''', (booking_id,)
     ).fetchone()
     conn.close()
-    return row
+    # dict, а не sqlite3.Row: админка использует row.get('platform', 'telegram'),
+    # у Row нет .get() -> AttributeError -> 500 (запись не удалялась/не уведомлялась).
+    # Индексация по ключу (b['status']) из ботов и тестов работает так же.
+    return dict(row) if row else None
 
 def get_user_by_id(user_id):
     conn = get_db()

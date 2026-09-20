@@ -40,6 +40,8 @@ export async function apiBlob(path, signal) {
 export const getHealth   = () => api('/api/health');
 export const getServices = () => api('/api/services');
 export const getStats    = () => api('/api/stats');
+export const getCalendar = (year, month) =>
+  api(`/api/calendar?year=${year}&month=${month}`);
 export const getBookings = () => api('/api/bookings');
 export const setStatus   = (id, status) =>
   api(`/api/bookings/${id}/status`, { method: 'POST', body: JSON.stringify({ status }) });

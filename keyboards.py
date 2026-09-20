@@ -9,16 +9,24 @@ from common import (ACTIVE_BOOKING_STATUSES, BOOKING_STATUS_SHORT,
 
 def get_main_menu(is_admin=False):
     markup = types.InlineKeyboardMarkup(row_width=2)
-    markup.add(
-        types.InlineKeyboardButton("🎨 Портфолио", callback_data="portfolio"),
-        types.InlineKeyboardButton("📅 Записаться", callback_data="booking_start"),
-        types.InlineKeyboardButton("💰 Прайс-лист", callback_data="price"),
-        types.InlineKeyboardButton("⭐ Отзывы", callback_data="reviews"),
-        types.InlineKeyboardButton("👤 Мои записи", callback_data="my_bookings"),
-        types.InlineKeyboardButton("ℹ️ О мастере", callback_data="about"),
-    )
     if is_admin:
-        markup.add(types.InlineKeyboardButton("🔧 Админ-панель", callback_data="admin"))
+        # Админ видит ТОЛЬКО свои функции — без портфолио/прайса/записи
+        markup.add(
+            types.InlineKeyboardButton("📋 Все записи", callback_data="admin_bookings"),
+            types.InlineKeyboardButton("➕ Добавить работу", callback_data="admin_add_work"),
+            types.InlineKeyboardButton("🗑 Управление портфолио", callback_data="admin_portfolio"),
+            types.InlineKeyboardButton("🚫 Блокировка слотов", callback_data="admin_slots"),
+            types.InlineKeyboardButton("⭐ Отзывы", callback_data="reviews"),
+        )
+    else:
+        markup.add(
+            types.InlineKeyboardButton("🎨 Портфолио", callback_data="portfolio"),
+            types.InlineKeyboardButton("📅 Записаться", callback_data="booking_start"),
+            types.InlineKeyboardButton("💰 Прайс-лист", callback_data="price"),
+            types.InlineKeyboardButton("⭐ Отзывы", callback_data="reviews"),
+            types.InlineKeyboardButton("👤 Мои записи", callback_data="my_bookings"),
+            types.InlineKeyboardButton("ℹ️ О мастере", callback_data="about"),
+        )
     return markup
 
 # ============ БАЗОВЫЕ ============
@@ -179,6 +187,100 @@ def get_admin_time_keyboard(year, month, day, blocked_slots=None):
     )
     return markup
 
+def get_admin_dashboard_calendar(year, month, bookings=None, blocked_slots=None):
+    """Календарь-дашборд для админа: показывает записи и заблокированные дни.
+
+    Маркеры дней:
+      🔴 — есть активные записи (pending/confirmed)
+      ⬛ — все слоты заблокированы
+      (число) — свободные дни
+    """
+    bookings = bookings or []
+    blocked_slots = blocked_slots or []
+
+    # Агрегация по дням
+    from common import slot_key as _sk
+    from datetime import datetime as _dt
+
+    booked_days = set()   # дни с активными записями
+    blocked_days = set()  # дни, где ВСЕ слоты (10-20) заблокированы
+
+    for b in bookings:
+        if b['status'] in ('pending', 'confirmed'):
+            try:
+                dt = _dt.strptime(b['date_time'].strip(), "%d.%m.%Y %H:%M")
+                booked_days.add(dt.day)
+            except (ValueError, TypeError):
+                pass
+
+    # Считаем заблокированные слоты по дням
+    blocked_by_day = {}
+    for slot in blocked_slots:
+        try:
+            # slot = "YYYY-MM-DD HH:00"
+            day = int(slot.split('-')[2].split()[0])
+            blocked_by_day[day] = blocked_by_day.get(day, 0) + 1
+        except (ValueError, IndexError):
+            pass
+    # День считается полностью заблокированным, если заблокированы все 11 слотов (10:00-20:00)
+    for day, count in blocked_by_day.items():
+        if count >= 11:
+            blocked_days.add(day)
+
+    today = _dt.now().date()
+
+    markup = types.InlineKeyboardMarkup()
+    markup.add(types.InlineKeyboardButton(
+        text=f"📅 {MONTHS_RU[month]} {year}", callback_data="ignore"))
+
+    markup.add(*[types.InlineKeyboardButton(text=d, callback_data="ignore")
+                 for d in WEEKDAYS_RU])
+
+    cal = calendar.monthcalendar(year, month)
+    for week in cal:
+        row = []
+        for day in week:
+            if day == 0:
+                row.append(_ign())
+            else:
+                day_date = _dt(year, month, day).date()
+                if day_date < today:
+                    # Прошедшее — серая точка
+                    row.append(types.InlineKeyboardButton(text="·", callback_data="ignore"))
+                elif day in blocked_days:
+                    # Полностью заблокирован
+                    row.append(types.InlineKeyboardButton(text="⬛", callback_data="ignore"))
+                elif day in booked_days:
+                    # Есть записи
+                    row.append(types.InlineKeyboardButton(
+                        text=f"🔴{day}", callback_data=f"admin_dash_day_{year}_{month}_{day}"))
+                else:
+                    # Свободен
+                    row.append(types.InlineKeyboardButton(
+                        text=str(day), callback_data=f"admin_dash_day_{year}_{month}_{day}"))
+        markup.row(*row)
+
+    prev_m = month - 1 or 12
+    prev_y = year - 1 if month == 1 else year
+    next_m = month + 1 if month < 12 else 1
+    next_y = year + 1 if month == 12 else year
+
+    markup.add(
+        types.InlineKeyboardButton("◀️", callback_data=f"admin_dash_cal_{prev_y}_{prev_m}"),
+        types.InlineKeyboardButton("📋 В записи", callback_data="admin_bookings"),
+        types.InlineKeyboardButton("▶️", callback_data=f"admin_dash_cal_{next_y}_{next_m}"),
+    )
+    # Кнопки админ-панели внизу
+    markup.add(
+        types.InlineKeyboardButton("🚫 Блокировка", callback_data="admin_slots"),
+        types.InlineKeyboardButton("➕ Работа", callback_data="admin_add_work"),
+        types.InlineKeyboardButton("⭐ Отзывы", callback_data="reviews"),
+    )
+    markup.add(
+        types.InlineKeyboardButton("🔧 В админку", callback_data="admin"),
+    )
+    return markup
+
 def get_about_keyboard():
     """Кнопки контактов в разделе О мастере"""
     from config import BOT_VK_LABEL, BOT_VK_URL
@@ -196,8 +298,12 @@ def get_rating_keyboard():
     markup.add(types.InlineKeyboardButton("◀️ В меню", callback_data="menu"))
     return markup
 
-def get_reviews_keyboard():
+def get_reviews_keyboard(is_admin=False, reviews=None):
     markup = types.InlineKeyboardMarkup()
+    if is_admin and reviews:
+        for r in reviews:
+            label = f"💬 Ответить на #{r['id']}" if not r['admin_reply'] else f"✅ #{r['id']} (отвечен)"
+            markup.add(types.InlineKeyboardButton(label, callback_data=f"admin_reply_review_{r['id']}"))
     markup.add(types.InlineKeyboardButton("✍️ Оставить отзыв", callback_data="add_review"))
     markup.add(types.InlineKeyboardButton("◀️ В меню", callback_data="menu"))
     return markup
@@ -256,6 +362,14 @@ def get_admin_booking_actions(booking_id, status=None):
         types.InlineKeyboardButton("💬 Написать клиенту", callback_data=f"ab_msg_{booking_id}"),
     )
     markup.add(types.InlineKeyboardButton("◀️ Назад", callback_data="admin_bookings"))
+    return markup
+
+def get_contact_master_keyboard():
+    """Кнопка «Связаться с мастером» — URL-кнопка, ведёт в чат бота."""
+    from config import BOT_HANDLE
+    markup = types.InlineKeyboardMarkup()
+    markup.add(types.InlineKeyboardButton("📞 Связаться с мастером",
+                                          url=f"https://t.me/{BOT_HANDLE}"))
     return markup
 
 def get_admin_portfolio_keyboard(works):

@@ -602,3 +602,185 @@ tbody tr:hover { background: var(--card-hover); }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: #2a2a31; border-radius: 9px; border: 2px solid var(--bg); }
 ::-webkit-scrollbar-thumb:hover { background: #3a3a43; }
+
+/* ============================================================
+   Календарь-дашборд
+   ============================================================ */
+
+.cal-wrap {
+  max-width: 680px;
+}
+
+.cal-header {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 18px;
+}
+.cal-nav { display: flex; align-items: center; gap: 14px; }
+.cal-nav-btn {
+  width: 36px; height: 36px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: var(--card);
+  color: var(--muted);
+  font-size: 13px;
+  cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  transition: all .18s var(--ease-out);
+}
+.cal-nav-btn:hover { color: var(--orange); border-color: var(--orange); transform: scale(1.08); }
+
+.cal-title {
+  font-family: var(--font-display);
+  font-size: 18px; font-weight: 600;
+  letter-spacing: .02em;
+  user-select: none;
+}
+
+.cal-today-btn {
+  padding: 7px 14px;
+  border-radius: 9px;
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--muted);
+  font-family: var(--font-body); font-size: 12.5px; font-weight: 600;
+  cursor: pointer;
+  transition: all .18s var(--ease-out);
+}
+.cal-today-btn:hover { color: var(--text); border-color: var(--faint); }
+
+/* Легенда */
+.cal-legend {
+  display: flex; gap: 18px; margin-bottom: 16px;
+  font-size: 12.5px; color: var(--muted);
+}
+.cal-legend-item { display: flex; align-items: center; gap: 6px; }
+.cal-dot {
+  width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
+}
+.cal-dot-booked { background: var(--orange); }
+.cal-dot-blocked { background: var(--purple); }
+
+/* Сетка */
+.cal-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 4px;
+}
+
+.cal-weekday {
+  text-align: center;
+  padding: 6px 0 10px;
+  font-family: var(--font-mono); font-size: 10.5px; font-weight: 700;
+  letter-spacing: .12em; text-transform: uppercase;
+  color: var(--faint);
+}
+
+.cal-cell {
+  aspect-ratio: 1;
+  border-radius: 12px;
+  border: 1.5px solid transparent;
+  background: var(--card);
+  color: var(--text);
+  font-family: var(--font-display); font-size: 14px; font-weight: 500;
+  cursor: pointer;
+  position: relative;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center; gap: 4px;
+  transition: all .18s var(--ease-out);
+}
+.cal-cell:hover { background: var(--card-hover); border-color: var(--line); transform: scale(1.06); }
+.cal-cell.empty { background: transparent; cursor: default; }
+.cal-cell.empty:hover { transform: none; }
+
+.cal-cell.past { color: var(--faint); opacity: .55; }
+.cal-cell.past:hover { opacity: .8; }
+
+.cal-cell.today {
+  border-color: var(--orange);
+  background: var(--orange-dim);
+  color: var(--orange-hi);
+  font-weight: 700;
+}
+.cal-cell.today:hover { border-color: var(--orange-hi); }
+
+.cal-cell.selected {
+  border-color: var(--purple);
+  background: var(--purple-dim);
+  transform: scale(1.08);
+  box-shadow: 0 0 0 2px var(--purple-dim);
+}
+
+.cal-day-num { line-height: 1; }
+
+.cal-indicators {
+  display: flex; gap: 3px; position: absolute; bottom: 5px;
+}
+.cal-ind-dot {
+  width: 5px; height: 5px; border-radius: 50%;
+}
+.cal-ind-dot.booked { background: var(--orange); }
+.cal-ind-dot.blocked { background: var(--purple); }
+
+/* Детали дня */
+.cal-detail {
+  margin-top: 18px;
+  background: var(--card);
+  border: 1px solid var(--line-soft);
+  border-radius: 14px;
+  padding: 16px 18px;
+  animation: row-in .25s var(--ease-out);
+}
+.cal-detail-head {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 12px;
+}
+.cal-detail-head strong {
+  font-family: var(--font-display); font-size: 14px; font-weight: 600;
+  color: var(--text);
+}
+.cal-detail-close {
+  background: none; border: none; color: var(--faint);
+  font-size: 14px; cursor: pointer; padding: 4px;
+  transition: color .15s;
+}
+.cal-detail-close:hover { color: var(--st-cancelled); }
+
+.cal-detail-section { margin-bottom: 12px; }
+.cal-detail-section:last-child { margin-bottom: 0; }
+.cal-detail-label {
+  font-size: 10.5px; font-weight: 700; letter-spacing: .1em;
+  text-transform: uppercase; color: var(--muted); margin-bottom: 8px;
+}
+
+.cal-booking-row {
+  display: flex; align-items: center; gap: 12px;
+  padding: 8px 10px; border-radius: 8px;
+  transition: background .15s;
+}
+.cal-booking-row:hover { background: var(--card-hover); }
+.cal-bk-time {
+  font-family: var(--font-mono); font-size: 12.5px; font-weight: 600;
+  color: var(--orange); min-width: 42px;
+}
+.cal-bk-name { font-weight: 600; font-size: 13px; min-width: 100px; }
+.cal-bk-service { font-size: 12.5px; color: var(--muted); flex: 1; }
+.cal-bk-status {
+  font-family: var(--font-mono); font-size: 10.5px;
+  text-transform: uppercase; letter-spacing: .06em;
+}
+
+.cal-blocked-hours {
+  display: flex; gap: 6px; flex-wrap: wrap;
+}
+.cal-blocked-chip {
+  padding: 4px 10px;
+  border-radius: 8px;
+  background: var(--purple-dim);
+  color: var(--purple-hi);
+  font-family: var(--font-mono); font-size: 11.5px; font-weight: 600;
+}
+
+.cal-detail-empty {
+  text-align: center; color: var(--faint); font-size: 13px;
+  padding: 10px 0;
+}

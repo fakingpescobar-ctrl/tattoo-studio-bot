@@ -10,6 +10,12 @@ admin/node_modules/
 admin/dist/
 admin/.vite/
 
+# Готовая сборка exe (electron-builder output) — выкладывать в GitHub Releases
+admin/release/
+
+# Ротированные логи ботов (bot.log.1, bot.log.2, ...)
+bot.log.*
+
 # Сгенерированный CA-бандл (certifi + certs/*.pem)
 certs/_bundle.pem
 
